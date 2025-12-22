@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
 const path = require("path");
 const { autoUpdater } = require("electron-updater");
 const log = require("electron-log");
@@ -9,11 +9,11 @@ let mainWindow;
 log.transports.file.level = "info";
 autoUpdater.logger = log;
 
-// ====== ТВОИ ДАННЫЕ GITHUB (ЗАМЕНИ!) ======
-const GITHUB_OWNER = "YOUR_GITHUB_NAME";
-const GITHUB_REPO = "YOUR_REPO_NAME";
+// ====== GitHub repo (у тебя уже известны) ======
+const GITHUB_OWNER = "msqwrst";
+const GITHUB_REPO = "resale-helper-app";
 
-// updatePolicy.json мы будем читать не локально, а с GitHub (чтобы “админ” менял без пересборки)
+// updatePolicy.json читаем с GitHub (админ может менять без пересборки)
 const POLICY_URL = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/main/src/electron/updatePolicy.json`;
 
 // ====== Utils: сравнение версий 1.2.10 > 1.2.3 ======
@@ -53,8 +53,14 @@ function fetchJson(url) {
 async function enforcePolicyIfNeeded() {
   // локальная подстраховка (если GitHub недоступен)
   const localPolicyPath = path.join(__dirname, "updatePolicy.json");
-  let localPolicy = { minVersion: "1.0.0", force: false, message: "Нужно обновить приложение." };
+  let localPolicy = {
+    minVersion: "0.0.0",
+    force: false,
+    message: "Нужно обновить приложение."
+  };
+
   try {
+    // require для json ок в cjs
     localPolicy = require(localPolicyPath);
   } catch {}
 
@@ -77,25 +83,11 @@ function setupAutoUpdater() {
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = false;
 
-  autoUpdater.on("checking-for-update", () => {
-    mainWindow?.webContents.send("update:checking");
-  });
-
-  autoUpdater.on("update-available", (info) => {
-    mainWindow?.webContents.send("update:available", info);
-  });
-
-  autoUpdater.on("update-not-available", (info) => {
-    mainWindow?.webContents.send("update:none", info);
-  });
-
-  autoUpdater.on("update-downloaded", (info) => {
-    mainWindow?.webContents.send("update:downloaded", info);
-  });
-
-  autoUpdater.on("error", (err) => {
-    mainWindow?.webContents.send("update:error", err?.message || String(err));
-  });
+  autoUpdater.on("checking-for-update", () => mainWindow?.webContents.send("update:checking"));
+  autoUpdater.on("update-available", (info) => mainWindow?.webContents.send("update:available", info));
+  autoUpdater.on("update-not-available", (info) => mainWindow?.webContents.send("update:none", info));
+  autoUpdater.on("update-downloaded", (info) => mainWindow?.webContents.send("update:downloaded", info));
+  autoUpdater.on("error", (err) => mainWindow?.webContents.send("update:error", err?.message || String(err)));
 
   // первая проверка + каждые 30 минут
   autoUpdater.checkForUpdates();
@@ -104,30 +96,49 @@ function setupAutoUpdater() {
 
 // ====== Окно ======
 async function createWindow() {
+  const isDev = !app.isPackaged;
+
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 800,
     backgroundColor: "#0f172a",
     show: false,
+    autoHideMenuBar: true,           // ✅ прячет меню
     webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
+      preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true
     }
   });
 
-  // грузим фронт (build)
-  mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
+  // ✅ убираем меню конкретно у окна + чтобы Alt не показывал
+  mainWindow.setMenu(null);
+  mainWindow.setMenuBarVisibility(false);
+  mainWindow.autoHideMenuBar = true;
+
+  // ВАЖНО: чтобы видеть, почему “пусто”
+  mainWindow.webContents.on("did-fail-load", (_e, code, desc, url) => {
+    log.error(`did-fail-load: code=${code} desc=${desc} url=${url}`);
+  });
+
+  mainWindow.webContents.on("render-process-gone", (_e, details) => {
+    log.error("render-process-gone:", details);
+  });
+
+  // грузим фронт
+  if (isDev) {
+    await mainWindow.loadURL("http://localhost:5173");
+    mainWindow.webContents.openDevTools({ mode: "detach" });
+  } else {
+    const indexPath = path.join(app.getAppPath(), "dist", "index.html");
+    await mainWindow.loadFile(indexPath);
+  }
 
   mainWindow.once("ready-to-show", async () => {
     mainWindow.show();
 
-    // 1) Проверяем policy (force update)
     const { policy, current, needBlock } = await enforcePolicyIfNeeded();
-
-    // Отдадим policy в renderer (если хочешь красиво отрисовать UI)
     mainWindow.webContents.send("update:policy", { policy, current, needBlock });
 
-    // 2) Если нужно блокировать — показываем окно и сразу запускаем update check
     if (needBlock) {
       await dialog.showMessageBox(mainWindow, {
         type: "warning",
@@ -138,7 +149,6 @@ async function createWindow() {
         detail: `Текущая версия: ${current}\nМинимальная версия: ${policy.minVersion}`
       });
 
-      // запускаем проверку и ждём, пока пользователь нажмёт "Обновить" (в UI)
       autoUpdater.checkForUpdates();
     }
   });
@@ -148,21 +158,16 @@ async function createWindow() {
 
 // ====== IPC ======
 ipcMain.handle("app:getVersion", () => app.getVersion());
-
-ipcMain.handle("update:policy", async () => {
-  return await enforcePolicyIfNeeded();
-});
-
-ipcMain.on("update:install", () => {
-  autoUpdater.quitAndInstall(true, true);
-});
-
-ipcMain.on("update:check", () => {
-  autoUpdater.checkForUpdates();
-});
+ipcMain.handle("update:policy", async () => await enforcePolicyIfNeeded());
+ipcMain.on("update:install", () => autoUpdater.quitAndInstall(true, true));
+ipcMain.on("update:check", () => autoUpdater.checkForUpdates());
 
 // ====== App ======
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  // ✅ убирает меню приложения целиком (Windows/Linux)
+  Menu.setApplicationMenu(null);
+  createWindow();
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

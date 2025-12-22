@@ -10,7 +10,8 @@ import {
   Info,
   TrendingUp,
   ChevronRight,
-  ListTodo
+  ListTodo,
+  Star
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -24,7 +25,7 @@ export default function Layout({ children, currentPageName }) {
 
   const menuItems = [
     { name: "Home", icon: Home, page: "Home", to: "/home" },
-    { name: "BP", icon: ListTodo, page: "BP", to: "/bp" },
+    { name: "BP", icon: Star, page: "BP", to: "/bp" },
     { name: "Timer", icon: Timer, page: "Timer", to: "/timer" },
     { name: "Calculator", icon: Calculator, page: "Calculator", to: "/calculator" },
     { name: "About", icon: Info, page: "About", to: "/about" }
@@ -142,7 +143,9 @@ export default function Layout({ children, currentPageName }) {
             </nav>
 
             <div className="absolute bottom-0 left-0 right-0 p-6 border-t border-slate-100">
-              <p className="text-xs text-slate-400 text-center">Version 1.0.0</p>
+              <p className="text-slate-500 text-center mb-6">
+                 Version {__APP_VERSION__}
+            </p>
             </div>
           </motion.div>
         )}

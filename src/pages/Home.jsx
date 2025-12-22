@@ -2,17 +2,17 @@ import React from "react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "@/utils";
-import { Timer, Calculator, Sparkles, ArrowRight, TrendingUp } from "lucide-react";
+import { Timer, Calculator, Sparkles, ArrowRight, TrendingUp, Star } from "lucide-react";
 
 export default function Home() {
   const tools = [
     {
     title: "BP",
       description: "Получайте BP за игровые задания",
-      icon: Timer,
+      icon: Star,
       color: "from-emerald-500 to-teal-600",
-      iconBg: "bg-emerald-100",
-      iconColor: "text-emerald-600",
+      iconBg: "bg-yellow-100",
+      iconColor: "text-amber-600",
       page: "BP"
     },
     {
@@ -29,8 +29,8 @@ export default function Home() {
       description: "Отслеживайте свои расходы, прибыль и сделки от перепродажи",
       icon: Calculator,
       color: "from-amber-500 to-orange-600",
-      iconBg: "bg-amber-100",
-      iconColor: "text-amber-600",
+      iconBg: "bg-sky-100",
+      iconColor: "text-black-600",
       page: "Calculator"
     }
   ];
@@ -87,7 +87,7 @@ export default function Home() {
               className="flex items-center justify-center gap-8 text-center"
             >
               <div>
-                <div className="text-2xl font-bold text-slate-900">2</div>
+                <div className="text-2xl font-bold text-slate-900">3</div>
                 <div className="text-sm text-slate-500">Tools</div>
               </div>
               <div className="w-px h-10 bg-slate-200" />

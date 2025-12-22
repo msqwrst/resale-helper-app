@@ -91,7 +91,10 @@ export default function About() {
             <h2 className="text-2xl font-bold text-slate-900 text-center mb-2">
               GTA 5 RP HELPER 
             </h2>
-            <p className="text-slate-500 text-center mb-6">Version 1.0.0</p>
+            <p className="text-slate-500 text-center mb-6">
+                 Version {__APP_VERSION__}
+            </p>
+
 
             <p className="text-slate-600 text-center leading-relaxed">
               Простой и элегантный инструмент, предназначенный для помощи перепродавцам в отслеживании их бизнес-операций

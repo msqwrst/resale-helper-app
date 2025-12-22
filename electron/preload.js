@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld("updater", {
   onNone: (cb) => ipcRenderer.on("update:none", (_, data) => cb(data)),
   onDownloaded: (cb) => ipcRenderer.on("update:downloaded", (_, data) => cb(data)),
   onError: (cb) => ipcRenderer.on("update:error", (_, data) => cb(data)),
+  onProgress: (cb) => ipcRenderer.on("update:progress", (_e, payload) => cb(payload)),
+  onPolicy: (cb) => ipcRenderer.on("update:policy", (_e, payload) => cb(payload)),
 
   getPolicy: () => ipcRenderer.invoke("update:policy"),
   getVersion: () => ipcRenderer.invoke("app:getVersion")

@@ -1,18 +1,18 @@
 {
   "name": "resale-helper-desktop",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.1.0",
   "type": "module",
-  "main": "electron/main.cjs",
+  "main": "src/electron/main.cjs",
   "description": "Resale Helper desktop app",
   "author": "mobsi",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "dist": "npm run build && electron-builder",
-    "preview": "vite preview",
     "electron:dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "npm run build && electron-builder"
+    "dist": "npm run build && electron-builder --publish never",
+    "dist:publish": "npm run build && electron-builder --publish always"
+    
   },
   "dependencies": {
     "axios": "^1.13.2",
@@ -27,49 +27,34 @@
     "semver": "^7.7.3"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.1",
-    "@types/react": "^19.2.5",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.1",
-    "autoprefixer": "^10.4.23",
     "concurrently": "^9.2.0",
     "electron": "^38.2.0",
     "electron-builder": "^26.4.0",
-    "eslint": "^9.39.1",
-    "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.4.24",
-    "globals": "^16.5.0",
-    "postcss": "^8.5.6",
-    "tailwindcss": "^3.4.17",
+    "wait-on": "^8.0.5",
     "vite": "^7.2.4",
-    "wait-on": "^8.0.5"
+    "tailwindcss": "^3.4.17",
+    "postcss": "^8.5.6",
+    "autoprefixer": "^10.4.23"
   },
   "build": {
-  "appId": "com.mobsi.resalehelper",
-  "productName": "Resale Helper",
-  "directories": {
-    "output": "release"
-  },
-  "files": [
-    "dist/**/*",
-    "src/electron/**/*"
-  ],
-  "extraMetadata": {
-    "main": "src/electron/main.js"
-  },
-  "publish": [
-    {
-      "provider": "github",
-      "owner": "YOUR_GITHUB_NAME",
-      "repo": "YOUR_REPO_NAME"
+    "appId": "com.msqwrst.resalehelper",
+    "productName": "Resale Helper",
+    "files": [
+      "dist/**/*",
+      "src/electron/**/*"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "msqwrst",
+        "repo": "resale-helper-app"
+      }
+    ],
+    "win": { "target": "nsis" },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false
     }
-  ],
-  "win": {
-    "target": "nsis"
-  },
-  "nsis": {
-    "oneClick": true,
-    "perMachine": false,
-    "allowToChangeInstallationDirectory": false
   }
-  }}
+}

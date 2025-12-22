@@ -1,5 +1,6 @@
 import React from "react";
 import { HashRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import UpdateOverlay from "./components/UpdateOverlay";
 
 import Layout from "@/components/Layout";
 import Splash from "@/pages/Splash";
@@ -25,18 +26,24 @@ function AppInner() {
     "Home";
 
   return (
-    <Layout currentPageName={currentPageName}>
-      <Routes>
-        <Route path="/" element={<Splash />} />
-        <Route path="/home" element={<Home />} />
-        <Route path="/bp" element={<BP />} />
-        <Route path="/timer" element={<Timer />} />
-        <Route path="/calculator" element={<Calculator />} />
-        <Route path="/about" element={<About />} />
-        <Route path="/usernotregisterederror" element={<UserNotRegisteredError />} />
-        <Route path="*" element={<Navigate to="/home" replace />} />
-      </Routes>
-    </Layout>
+    <>
+      {/* Основное приложение */}
+      <Layout currentPageName={currentPageName}>
+        <Routes>
+          <Route path="/" element={<Splash />} />
+          <Route path="/home" element={<Home />} />
+          <Route path="/bp" element={<BP />} />
+          <Route path="/timer" element={<Timer />} />
+          <Route path="/calculator" element={<Calculator />} />
+          <Route path="/about" element={<About />} />
+          <Route path="/usernotregisterederror" element={<UserNotRegisteredError />} />
+          <Route path="*" element={<Navigate to="/home" replace />} />
+        </Routes>
+      </Layout>
+
+      {/* 🔒 Update Overlay — ВСЕГДА поверх всего */}
+      <UpdateOverlay />
+    </>
   );
 }
 
