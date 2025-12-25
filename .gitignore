@@ -30,3 +30,4 @@ release/
 
 # electron-builder cache
 *.asar
+.env
