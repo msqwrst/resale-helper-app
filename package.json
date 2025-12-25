@@ -1,20 +1,28 @@
 {
-  "name": "resale-helper-desktop",
+  "name": "mhelper",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.6",
+  "description": "MHELPER desktop app",
+  "author": "mobsi",
   "type": "module",
   "main": "src/electron/main.cjs",
-  "description": "Resale Helper desktop app",
-  "author": "mobsi",
   "scripts": {
+    "chat": "cd src/electron/chat && node chat.js",
+    "servers": "concurrently \"cd src/electron/backend && node index.js\" \"cd src/electron/backend && node bot.cjs\"",
+    "full": "concurrently \"npm run dev\" \"npm run servers\"",
     "dev": "vite",
     "build": "vite build",
-    "electron:dev": "concurrently -k \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "backend": "cd src/electron/backend && node index.js",
+    "bot": "cd src/electron/backend && node bot.cjs",
+    "app": "concurrently -k \"npm run dev\" \"npm run backend\" \"npm run bot\" \"npm run chat\" \"wait-on http://localhost:5173 && electron .\"",
+    "app:all": "concurrently -k \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "clean": "rimraf dist dist-web win-unpacked",
     "dist": "npm run build && electron-builder --publish never",
+    "exe": "npm run clean && npm run dist",
     "dist:publish": "npm run build && electron-builder --publish always"
-    
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.89.0",
     "axios": "^1.13.2",
     "date-fns": "^4.1.0",
     "electron-log": "^5.4.3",
@@ -24,37 +32,56 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.11.0",
+    "recharts": "^3.6.0",
     "semver": "^7.7.3"
   },
   "devDependencies": {
+    "@babel/code-frame": "^7.27.1",
+    "@vitejs/plugin-react": "^5.1.2",
+    "autoprefixer": "^10.4.23",
     "concurrently": "^9.2.0",
     "electron": "^38.2.0",
     "electron-builder": "^26.4.0",
-    "wait-on": "^8.0.5",
-    "vite": "^7.2.4",
-    "tailwindcss": "^3.4.17",
     "postcss": "^8.5.6",
-    "autoprefixer": "^10.4.23"
+    "tailwindcss": "^3.4.17",
+    "vite": "^7.2.4",
+    "wait-on": "^8.0.5"
   },
   "build": {
-    "appId": "com.msqwrst.resalehelper",
-    "productName": "Resale Helper",
+    "appId": "com.mhelper.app",
+    "productName": "MHELPER",
     "files": [
       "dist/**/*",
-      "src/electron/**/*"
+      "src/electron/**/*",
+      "build/icons/**/*",
+      "public/icons/**/*",
+      "assets/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "assets",
+        "to": "assets"
+      }
+    ],
+    "artifactName": "MHELPER.exe",
+    "win": {
+      "target": "nsis",
+      "icon": "build/icons/icon.ico",
+      "executableName": "MHELPER"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": false
+    },
     "publish": [
       {
         "provider": "github",
         "owner": "msqwrst",
-        "repo": "resale-helper-app"
+        "repo": "resale-helper-app",
+        "releaseType": "release"
       }
-    ],
-    "win": { "target": "nsis" },
-    "nsis": {
-      "oneClick": true,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": false
-    }
+    ]
   }
 }
