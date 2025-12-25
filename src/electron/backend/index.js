@@ -688,8 +688,7 @@ function pickSnippetsForceLawFiles() {
 const OLLAMA_HOST = process.env.OLLAMA_HOST;
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL;
 
-const OLLAMA_ENABLED = Boolean(OLLAMA_HOST && OLLAMA_MODEL);
-
+const OLLAMA_ENABLED = (process.env.OLLAMA_ENABLED ?? "1") !== "0" && Boolean(OLLAMA_HOST && OLLAMA_MODEL);
 async function ollamaGenerate({ model, system, prompt }) {
   if (typeof OLLAMA_ENABLED !== "undefined" && !OLLAMA_ENABLED) throw new Error("OLLAMA_DISABLED");
   const r = await fetch(`${OLLAMA_HOST}/api/generate`, {
@@ -796,6 +795,9 @@ app.post("/api/ai/reload_rules", (_req, res) => {
 
 app.post("/api/ai/reindex", async (_req, res) => {
   try {
+    if (!OLLAMA_ENABLED) {
+      return res.status(400).json({ error: "OLLAMA_DISABLED", message: "Ollama отключена (OLLAMA_ENABLED=0 или нет OLLAMA_HOST/OLLAMA_MODEL)." });
+    }
     reloadRules();
     if (!RULE_CHUNKS.length) {
       return res.status(400).json({ error: "NO_RULES", message: `No rules chunks found in ${RULES_DIR}` });
@@ -949,6 +951,13 @@ app.post("/api/ai/chat", async (req, res) => {
 ${context || "(контекст пуст — нет релевантных фрагментов)"}
 
 ОТВЕТ (со ссылкой на источник):`;
+
+    if (!OLLAMA_ENABLED) {
+      // Fallback: return top snippets directly (no generation)
+      const snippetText = context ? context : "В памятке/правилах этого не найдено.";
+      const short = snippetText.length > 2500 ? snippetText.slice(0, 2500) + "…" : snippetText;
+      return res.json({ reply: short, model: null, ollama: "OFF" });
+    }
 
     const result = await ollamaGenerate({ model: (typeof OLLAMA_MODEL === "string" ? OLLAMA_MODEL : null), system, prompt });
 
@@ -1635,7 +1644,7 @@ app.get("/api/rules/ref/:ref", (req, res) => {
 // =====================================================
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`✅ Backend listening on port ${PORT}`);
-  console.log(`🤖 Ollama: ${OLLAMA_HOST} | model: ${OLLAMA_MODEL} | embed: ${OLLAMA_EMBED_MODEL}`);
+  console.log(`🤖 Ollama: ${OLLAMA_ENABLED ? OLLAMA_HOST : 'OFF'} | model: ${OLLAMA_ENABLED ? OLLAMA_MODEL : 'OFF'} | embed: ${OLLAMA_ENABLED ? OLLAMA_EMBED_MODEL : 'OFF'}`);
   console.log(`📚 rules dir: ${RULES_DIR} | indexed refs: ${REF_INDEX.size} | chunks: ${RULE_CHUNKS.length}`);
   console.log(`🧠 RAG store: ${RAG_STORE_PATH} | vectors: ${RAG?.chunks?.length || 0}`);
   console.log(`📄 rules file fallback: ${RULES_FILE}`);
