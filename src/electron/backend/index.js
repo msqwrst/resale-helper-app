@@ -691,6 +691,7 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL;
 const OLLAMA_ENABLED = Boolean(OLLAMA_HOST && OLLAMA_MODEL);
 
 async function ollamaGenerate({ model, system, prompt }) {
+  if (typeof OLLAMA_ENABLED !== "undefined" && !OLLAMA_ENABLED) throw new Error("OLLAMA_DISABLED");
   const r = await fetch(`${OLLAMA_HOST}/api/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -702,6 +703,7 @@ async function ollamaGenerate({ model, system, prompt }) {
 }
 
 async function ollamaEmbed(text) {
+  if (typeof OLLAMA_ENABLED !== "undefined" && !OLLAMA_ENABLED) throw new Error("OLLAMA_DISABLED");
   const r = await fetch(`${OLLAMA_HOST}/api/embeddings`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -727,7 +729,7 @@ function aiIsBlocked(text) {
 // =====================================================
 // 🧠 RAG store (embeddings) — OPTIONAL but recommended
 // =====================================================
-let RAG = { meta: { created_at: null, model: OLLAMA_EMBED_MODEL, count: 0 }, chunks: [] };
+let RAG = { meta: { created_at: null, model: (typeof OLLAMA_EMBED_MODEL === "string" ? OLLAMA_EMBED_MODEL : null), count: 0 }, chunks: [] };
 
 function ragLoad() {
   try {
@@ -773,8 +775,8 @@ app.get("/api/ai/health", (_req, res) =>
   res.json({
     ok: true,
     ollama: OLLAMA_HOST,
-    model: OLLAMA_MODEL,
-    embed_model: OLLAMA_EMBED_MODEL,
+    model: (typeof OLLAMA_MODEL === "string" ? OLLAMA_MODEL : null),
+    embed_model: (typeof OLLAMA_EMBED_MODEL === "string" ? OLLAMA_EMBED_MODEL : null),
     rulesDir: RULES_DIR,
     rulesFile: RULES_FILE,
     indexedRefs: REF_INDEX.size,
@@ -948,13 +950,13 @@ ${context || "(контекст пуст — нет релевантных фр�
 
 ОТВЕТ (со ссылкой на источник):`;
 
-    const result = await ollamaGenerate({ model: OLLAMA_MODEL, system, prompt });
+    const result = await ollamaGenerate({ model: (typeof OLLAMA_MODEL === "string" ? OLLAMA_MODEL : null), system, prompt });
 
     const reply =
       (result?.response || "").trim() ||
       "Не нашёл этого в памятке/правилах. Уточни формулировку или добавь текст в rules/*.txt и сделай reindex.";
 
-    return res.json({ reply, model: OLLAMA_MODEL });
+    return res.json({ reply, model: (typeof OLLAMA_MODEL === "string" ? OLLAMA_MODEL : null) });
   } catch (e) {
     console.error("AI CHAT ERROR:", e);
     return res.status(500).json({ error: "AI_ERROR", message: e?.message || String(e) });
