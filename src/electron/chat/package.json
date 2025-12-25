@@ -1,0 +1,11 @@
+{
+  "name": "mhelper-chat-backend",
+  "private": true,
+  "type": "module",
+  "main": "chat.js",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "string-similarity": "^4.0.4"
+  }
+}

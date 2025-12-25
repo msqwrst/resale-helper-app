@@ -3,24 +3,37 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 import { readFileSync } from "node:fs";
 
-// читаем version из package.json (при старте dev/build)
 const pkg = JSON.parse(
   readFileSync(new URL("./package.json", import.meta.url), "utf-8")
 );
 
 export default defineConfig({
-  // КРИТИЧНО для Electron (file://)
-  base: "./",
+  base: "./", // 🔥 КРИТИЧНО для Electron
 
   plugins: [react()],
 
   define: {
-    __APP_VERSION__: JSON.stringify(pkg.version),
+    __APP_VERSION__: JSON.stringify(pkg.version)
+  },
+
+  // ✅ FIX: всегда один порт для wait-on/electron
+  server: {
+    port: 5173,
+    strictPort: true,
+
+    // ✅ ПРОКСИ ДЛЯ AI/Backend API
+    proxy: {
+      "/api": {
+        target: "http://127.0.0.1:3001", // <-- порт твоего backend (поменяй если другой)
+        changeOrigin: true,
+        secure: false
+      }
+    }
   },
 
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
-  },
+      "@": path.resolve(__dirname, "./src")
+    }
+  }
 });

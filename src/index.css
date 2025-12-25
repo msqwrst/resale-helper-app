@@ -1,3 +1,15 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background: #0b1220; /* на случай если где-то белое вылезет */
+}
+
+/* ✅ важно: НЕ light */
+:root { color-scheme: dark; }
+.dark { color-scheme: dark; }

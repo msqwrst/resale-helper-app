@@ -1,366 +1,682 @@
-import React, { useEffect, useRef, useState } from "react";
-import { motion } from "framer-motion";
-import alarmMp3 from "@/assets/facebook-messenger-ringtone.mp3";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Play, Pause, RotateCcw, Timer as TimerIcon } from "lucide-react";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle
-} from "@/components/ui/alert-dialog";
+  Plus,
+  Trash2,
+  Play,
+  Pause,
+  RotateCcw,
+  Bell,
+  Volume2,
+  VolumeX,
+  Sparkles,
+  Crown
+} from "lucide-react";
+
+import messengerRingtone from "@/assets/facebook-messenger-ringtone.mp3";
+
+const LS_KEY = "resale_timer_state_v3";
+const LS_FORM_KEY = "resale_timer_form_v1";
+const MAX_TIMERS_FREE = 2;
+
+const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:3001";
+function getToken() {
+  try {
+    return localStorage.getItem("auth_token");
+  } catch {
+    return null;
+  }
+}
+async function fetchMeSafe() {
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${API_URL}/me`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+function parseDate(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+function tierFromMe(me) {
+  const role = String(me?.role || "").toLowerCase();
+
+  const isAdmin = role === "admin";
+
+  const vipUntil = parseDate(me?.vip_until);
+  const vipByDate = vipUntil ? vipUntil.getTime() > Date.now() : false;
+  const isVip = isAdmin || role === "vip" || !!me?.vip_active || vipByDate;
+
+  const promoUntil = parseDate(me?.promo_until);
+  const promoByDate = promoUntil ? promoUntil.getTime() > Date.now() : false;
+  const isPromo = isAdmin || role === "promo" || !!me?.promo_active || promoByDate;
+
+  if (isAdmin) return "ADMIN";
+  if (isVip) return "VIP";
+  if (isPromo) return "PROMO";
+  return "FREE";
+}
+
+function clamp(n, a, b) {
+  return Math.max(a, Math.min(b, n));
+}
+function uid() {
+  return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+function safeParse(json) {
+  try {
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+function formatTime(totalSec) {
+  const s = Math.max(0, Math.floor(totalSec));
+  const hh = Math.floor(s / 3600);
+  const mm = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  const pad = (x) => String(x).padStart(2, "0");
+  if (hh > 0) return `${hh}:${pad(mm)}:${pad(ss)}`;
+  return `${mm}:${pad(ss)}`;
+}
+function secondsFromInputs(minutes, seconds) {
+  const m = parseInt(String(minutes).replace(/\D/g, "") || "0", 10);
+  const s = parseInt(String(seconds).replace(/\D/g, "") || "0", 10);
+  return clamp(m, 0, 999) * 60 + clamp(s, 0, 59);
+}
 
 export default function Timer() {
-  const alarmRef = useRef(null);
-  const intervalRef = useRef(null);
-
-  const [minutes, setMinutes] = useState("5");
+  const [minutes, setMinutes] = useState("3");
   const [seconds, setSeconds] = useState("0");
+  const [label, setLabel] = useState("");
+  const [soundOn, setSoundOn] = useState(true);
 
-  const [totalSeconds, setTotalSeconds] = useState(0);
-  const [remainingSeconds, setRemainingSeconds] = useState(0);
+  const [me, setMe] = useState(null);
+  const [tier, setTier] = useState("FREE");
 
-  const [isRunning, setIsRunning] = useState(false);
-  const [hasStarted, setHasStarted] = useState(false);
+  const [timers, setTimers] = useState([]);
+  const [history, setHistory] = useState([]);
 
-  const [showAlert, setShowAlert] = useState(false);
+  const [limitMsg, setLimitMsg] = useState("");
+  const limitMsgTimerRef = useRef(null);
 
-  // ✅ init alarm (loop)
+  const audioRef = useRef(null);
+  const tickRef = useRef(null);
+  const [alarmTimerId, setAlarmTimerId] = useState(null);
+
+  // ✅ refs чтобы интервал не пересоздавался каждую секунду (и не лагал UI)
+  const alarmRef = useRef(null);
+  const soundOnRef = useRef(true);
+
   useEffect(() => {
-    alarmRef.current = new Audio(alarmMp3);
-    alarmRef.current.loop = true;
-    alarmRef.current.volume = 0.8;
+    alarmRef.current = alarmTimerId;
+  }, [alarmTimerId]);
 
+  useEffect(() => {
+    soundOnRef.current = soundOn;
+  }, [soundOn]);
+
+  const isPrivileged = useMemo(() => tier !== "FREE", [tier]);
+  const maxTimersAllowed = isPrivileged ? 30 : MAX_TIMERS_FREE;
+
+  const totalSeconds = useMemo(
+    () => secondsFromInputs(minutes, seconds),
+    [minutes, seconds]
+  );
+
+  const showLimit = (msg) => {
+    try {
+      if (limitMsgTimerRef.current) window.clearTimeout(limitMsgTimerRef.current);
+      setLimitMsg(msg);
+      limitMsgTimerRef.current = window.setTimeout(() => setLimitMsg(""), 2500);
+    } catch {}
+  };
+
+  // ===== load me/tier =====
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const m = await fetchMeSafe();
+      if (!alive) return;
+      setMe(m);
+      setTier(tierFromMe(m));
+    })();
     return () => {
+      alive = false;
       try {
-        alarmRef.current?.pause();
-        alarmRef.current = null;
+        if (limitMsgTimerRef.current) window.clearTimeout(limitMsgTimerRef.current);
       } catch {}
     };
   }, []);
 
-  const startAlarm = async () => {
-    try {
-      if (!alarmRef.current) return;
-      alarmRef.current.currentTime = 0;
-      await alarmRef.current.play();
-    } catch {
-      // если вдруг политика звука мешает — можно добавить кнопку "Включить звук"
+  // ===== load form draft =====
+  useEffect(() => {
+    const saved = safeParse(localStorage.getItem(LS_FORM_KEY) || "");
+    if (saved && typeof saved === "object") {
+      if (typeof saved.minutes === "string") setMinutes(saved.minutes);
+      if (typeof saved.seconds === "string") setSeconds(saved.seconds);
+      if (typeof saved.label === "string") setLabel(saved.label);
     }
-  };
+  }, []);
 
+  // ===== load state =====
+  useEffect(() => {
+    const saved = safeParse(localStorage.getItem(LS_KEY) || "");
+    if (saved && typeof saved === "object") {
+      if (Array.isArray(saved.timers)) setTimers(saved.timers);
+      if (Array.isArray(saved.history)) setHistory(saved.history);
+      if (typeof saved.soundOn === "boolean") setSoundOn(saved.soundOn);
+    }
+  }, []);
+
+  // ===== persist =====
+  useEffect(() => {
+    localStorage.setItem(
+      LS_KEY,
+      JSON.stringify({
+        timers,
+        history,
+        soundOn
+      })
+    );
+  }, [timers, history, soundOn]);
+
+  // ===== alarm helpers =====
   const stopAlarm = () => {
     try {
-      if (!alarmRef.current) return;
-      alarmRef.current.pause();
-      alarmRef.current.currentTime = 0;
+      const a = audioRef.current;
+      if (a) {
+        a.pause();
+        a.currentTime = 0;
+      }
+    } catch {}
+    setAlarmTimerId(null);
+  };
+
+  const unlockAudio = async () => {
+    try {
+      const a = audioRef.current;
+      if (!a) return;
+      a.loop = true;
+      a.volume = 0.9;
+      await a.play();
+      a.pause();
+      a.currentTime = 0;
     } catch {}
   };
 
-  // ✅ Пункты 1-в-1 как на скрине
-  const categories = [
-    { label: "Выберите категорию", value: "", total: null },
-    { label: "Почта (10:00)", value: "mail", total: 10 * 60 },
-    { label: "Организация (02:00:00)", value: "org", total: 2 * 60 * 60 },
-    { label: "Карты таро (03:00:00)", value: "taro", total: 3 * 60 * 60 },
-    { label: "Дрессировка (15:00)", value: "train", total: 15 * 60 },
-    { label: "Автоугон (01:30:00)", value: "carjack", total: 1 * 60 * 60 + 30 * 60 },
-    { label: "Сутенерка (01:30:00)", value: "pimp", total: 1 * 60 * 60 + 30 * 60 },
-    { label: "Автобус (03:00)", value: "bus", total: 3 * 60 },
-    { label: "Задание клуба (02:00:00)", value: "club", total: 2 * 60 * 60 },
-    { label: "Тир (01:30:00)", value: "range", total: 1 * 60 * 60 + 30 * 60 },
-    { label: "Контрабанда (05:00)", value: "contraband", total: 5 * 60 },
-    { label: "Свой таймер", value: "custom", total: null }
-  ];
-
-  const [selectedCategory, setSelectedCategory] = useState("");
-
-  const applyTotal = (total) => {
-    const m = Math.floor(total / 60);
-    const s = total % 60;
-    setMinutes(String(m));
-    setSeconds(String(s));
+  const startAlarm = async (timerId) => {
+    if (!soundOnRef.current) return;
+    try {
+      const a = audioRef.current;
+      if (!a) return;
+      a.loop = true;
+      a.volume = 0.9;
+      await a.play();
+      setAlarmTimerId(timerId);
+    } catch {}
   };
 
-  const handleCategoryChange = (value) => {
-    setSelectedCategory(value);
-
-    const item = categories.find((c) => c.value === value);
-    if (!item) return;
-
-    if (item.value === "custom" || item.total == null) return;
-    if (hasStarted) return;
-
-    applyTotal(item.total);
-  };
-
-  // ✅ ticking (без запуска звука внутри setState)
   useEffect(() => {
-    if (isRunning && remainingSeconds > 0) {
-      intervalRef.current = setInterval(() => {
-        setRemainingSeconds((prev) => {
-          if (prev <= 1) {
-            setIsRunning(false);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [isRunning, remainingSeconds]);
-
-  // ✅ когда дошли до 0 — показываем окно и включаем звук (loop)
-  useEffect(() => {
-    if (hasStarted && remainingSeconds === 0 && !isRunning && totalSeconds > 0) {
-      setShowAlert(true);
-      startAlarm();
-    }
+    if (!soundOn && alarmTimerId) stopAlarm();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasStarted, remainingSeconds, isRunning, totalSeconds]);
+  }, [soundOn]);
 
-  const handleStart = () => {
-    stopAlarm(); // ✅ всегда вырубаем звук перед стартом
+  // ===== actions =====
+  const addTimer = async (sec, name) => {
+    const s = typeof sec === "number" ? sec : totalSeconds;
+    const n = typeof name === "string" ? name : label;
+    if (s <= 0) return;
 
-    const mins = parseInt(minutes, 10) || 0;
-    const secs = parseInt(seconds, 10) || 0;
-
-    if (!hasStarted) {
-      const total = mins * 60 + secs;
-      if (total <= 0) return;
-
-      setTotalSeconds(total);
-      setRemainingSeconds(total);
-      setHasStarted(true);
-      setIsRunning(true);
+    if (!isPrivileged && timers.length >= MAX_TIMERS_FREE) {
+      showLimit("FREE: максимум 2 таймера. VIP/PROMO/ADMIN — без лимита.");
       return;
     }
 
-    // если дошёл до 0 — стартуем заново
-    if (remainingSeconds === 0 && totalSeconds > 0) {
-      setRemainingSeconds(totalSeconds);
-    }
+    await unlockAudio();
 
-    setIsRunning(true);
+    const now = Date.now();
+    const t = {
+      id: uid(),
+      label: (n || "").trim() || "Таймер",
+      totalSec: s,
+      running: true,
+      targetTs: now + s * 1000,
+      remaining: s,
+      createdTs: now,
+      endedTs: null
+    };
+
+    setTimers((prev) => [t, ...prev].slice(0, maxTimersAllowed));
+
+    if ((n || "").trim()) {
+      setHistory((prev) => [{ label: (n || "").trim(), sec: s, ts: now }, ...prev].slice(0, 20));
+    }
   };
 
-  const handlePause = () => setIsRunning(false);
+  const pauseTimer = (id) => {
+    setTimers((prev) =>
+      prev.map((t) => {
+        if (t.id !== id) return t;
+        if (!t.running) return t;
+        const now = Date.now();
+        const left = Math.max(0, Math.round((t.targetTs - now) / 1000));
+        return { ...t, running: false, targetTs: null, remaining: left };
+      })
+    );
+  };
 
-  const handleReset = () => {
+  const resumeTimer = async (id) => {
+    await unlockAudio();
+    setTimers((prev) =>
+      prev.map((t) => {
+        if (t.id !== id) return t;
+        if (t.running) return t;
+        const now = Date.now();
+        const left = Math.max(0, Math.floor(t.remaining || 0));
+        if (left <= 0) return t;
+        return { ...t, running: true, targetTs: now + left * 1000 };
+      })
+    );
+  };
+
+  const resetTimer = (id) => {
+    if (alarmTimerId === id) stopAlarm();
+    setTimers((prev) =>
+      prev.map((t) =>
+        t.id === id
+          ? { ...t, running: false, targetTs: null, remaining: t.totalSec, endedTs: null }
+          : t
+      )
+    );
+  };
+
+  const removeTimer = (id) => {
+    if (alarmTimerId === id) stopAlarm();
+    setTimers((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const clearAll = () => {
     stopAlarm();
-    setIsRunning(false);
-    setHasStarted(false);
-    setRemainingSeconds(0);
-    setTotalSeconds(0);
-    setShowAlert(false);
+    setTimers([]);
   };
 
-  const presets = [
-    { label: "1 мин", m: 1, s: 0 },
-    { label: "5 мин", m: 5, s: 0 },
-    { label: "10 мин", m: 10, s: 0 },
-    { label: "15 мин", m: 15, s: 0 }
-  ];
+  const presets = useMemo(
+    () => [
+      { name: "Почта", sec: 600 },
+      { name: "Дрессировка", sec: 900 },
+      { name: "Задан. Клуба", sec: 7200 },
+      { name: "Тир", sec: 5400 },
+      { name: "Таро", sec: 10800 },
+      { name: "Угонка", sec: 5400 },
+      { name: "Сутинерка", sec: 5400 }
+    ],
+    []
+  );
 
-  const applyPreset = (m, s) => {
-    if (!hasStarted) {
-      setMinutes(String(m));
-      setSeconds(String(s));
-      setSelectedCategory("custom");
+  const hasRunning = useMemo(
+    () => timers.some((t) => t.running && t.targetTs),
+    [timers]
+  );
+
+  // ✅ НЕЛАГАЮЩИЙ тик-луп: запускается только когда есть running таймеры
+  // ✅ уведомление/звук строго 1 раз на завершение
+  useEffect(() => {
+    if (tickRef.current) {
+      clearInterval(tickRef.current);
+      tickRef.current = null;
     }
-  };
+    if (!hasRunning) return;
 
-  const progress = totalSeconds > 0 ? ((totalSeconds - remainingSeconds) / totalSeconds) * 100 : 0;
+    const tick = () => {
+      const now = Date.now();
+      let finished = null;
 
-  const formatTime = (secs) => {
-    const mins = Math.floor(secs / 60);
-    const rem = secs % 60;
-    return { m: String(mins).padStart(2, "0"), s: String(rem).padStart(2, "0") };
-  };
+      setTimers((prev) =>
+        prev.map((t) => {
+          if (!t.running || !t.targetTs) return t;
 
-  const display = formatTime(remainingSeconds);
+          const left = Math.max(0, Math.round((t.targetTs - now) / 1000));
 
-  const r = 45;
-  const c = 2 * Math.PI * r;
-  const dash = c - (progress / 100) * c;
+          if (left <= 0) {
+            // уже завершали — НЕ спамим
+            if (t.endedTs) return { ...t, running: false, targetTs: null, remaining: 0 };
+
+            finished = { id: t.id, label: t.label };
+            return { ...t, running: false, targetTs: null, remaining: 0, endedTs: now };
+          }
+
+          return { ...t, remaining: left };
+        })
+      );
+
+      if (!alarmRef.current && finished) {
+        try {
+          if ("Notification" in window) {
+            const show = () =>
+              new Notification("Таймер завершён", {
+                body: finished.label || "Пора действовать 💥"
+              });
+
+            if (Notification.permission === "granted") show();
+            else if (Notification.permission !== "denied") {
+              Notification.requestPermission().then((p) => p === "granted" && show());
+            }
+          }
+        } catch {}
+
+        startAlarm(finished.id);
+      }
+    };
+
+    tick(); // сразу обновим
+    tickRef.current = setInterval(tick, 1000); // ✅ 1 раз/сек (без лагов и блокировок)
+
+    return () => {
+      if (tickRef.current) {
+        clearInterval(tickRef.current);
+        tickRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasRunning]);
+
+  const isFreeAtLimit = useMemo(
+    () => !isPrivileged && timers.length >= MAX_TIMERS_FREE,
+    [isPrivileged, timers.length]
+  );
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white pb-12">
-      <div className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white px-6 py-8">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-2xl mx-auto">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="p-2 bg-white/20 rounded-xl">
-              <TimerIcon className="w-6 h-6" />
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white dark:from-slate-950 dark:to-slate-950">
+      <div className="px-6 pt-8 pb-10">
+        <motion.div
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+          className="max-w-3xl mx-auto"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-2xl font-extrabold text-slate-900 dark:text-slate-50 flex items-center gap-2">
+                Таймеры <Sparkles className="w-5 h-5 text-indigo-500" />
+              </div>
+              <div className="text-sm text-slate-600 dark:text-slate-300 mt-1">
+                {isPrivileged ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Crown className="w-4 h-4 text-amber-500" />
+                    Статус: <b className="ml-1">{tier}</b> • без лимита на таймеры
+                  </span>
+                ) : (
+                  <span>FREE: максимум {MAX_TIMERS_FREE} таймера одновременно</span>
+                )}
+              </div>
             </div>
-            <h1 className="text-2xl font-bold">Таймер</h1>
-          </div>
-          <p className="text-emerald-100">Установите обратный отсчет для объявлений, аукционов или напоминаний</p>
-        </motion.div>
-      </div>
 
-      <div className="px-6 -mt-4">
-        <div className="max-w-md mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 p-8 mb-6"
-          >
-            {/* Категория таймера */}
-            <div className="mb-5">
-              <div className="text-xs font-semibold text-slate-500 mb-2">Категория таймера</div>
-              <select
-                value={selectedCategory}
-                onChange={(e) => handleCategoryChange(e.target.value)}
-                disabled={hasStarted}
-                className={`w-full rounded-xl border px-3 py-2 text-sm outline-none transition ${
-                  hasStarted
-                    ? "border-slate-200 text-slate-400 bg-slate-50"
-                    : "border-amber-400/60 focus:border-amber-400 bg-white text-slate-800"
-                }`}
+            {alarmTimerId ? (
+              <Button
+                type="button"
+                onClick={stopAlarm}
+                className="rounded-2xl bg-rose-600 hover:bg-rose-600/90"
               >
-                {categories.map((c) => (
-                  <option key={c.value || c.label} value={c.value}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-              {hasStarted && <div className="text-xs text-slate-400 mt-2">Чтобы сменить категорию — нажми “Сбросить”.</div>}
-            </div>
+                <Bell className="w-4 h-4 mr-2" />
+                Остановить
+              </Button>
+            ) : null}
+          </div>
 
-            {/* Circle */}
-            <div className="relative w-56 h-56 mx-auto mb-8">
-              <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                <circle cx="50" cy="50" r={r} fill="none" stroke="#f1f5f9" strokeWidth="8" />
-                <motion.circle
-                  cx="50"
-                  cy="50"
-                  r={r}
-                  fill="none"
-                  stroke="#10b981"
-                  strokeWidth="8"
-                  strokeLinecap="round"
-                  strokeDasharray={c}
-                  strokeDashoffset={dash}
-                  initial={false}
-                  animate={{ strokeDashoffset: dash }}
-                  transition={{ duration: 0.2 }}
-                />
-              </svg>
-
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="text-center">
-                  <div className="text-5xl font-bold text-slate-900 tabular-nums">
-                    {display.m}:{display.s}
-                  </div>
-                  <div className="text-sm text-slate-500 mt-1">{hasStarted ? (isRunning ? "Running" : "Paused") : "Ready"}</div>
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.06 }}
+            className="mt-6 bg-white dark:bg-slate-900/60 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-black/30 border border-slate-100 dark:border-slate-800 p-6"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1">
+                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                  Название
                 </div>
+                <Input
+                  value={label}
+                  onChange={(e) => setLabel(e.target.value)}
+                  placeholder="например: угонка"
+                  className="w-full dark:bg-slate-950/40 dark:border-slate-800 dark:text-slate-100"
+                />
+                <AnimatePresence>
+                  {!!limitMsg && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 6 }}
+                      className="mt-3 rounded-2xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-900 dark:text-amber-100"
+                    >
+                      {limitMsg}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
+
+              <Button
+                onClick={() => addTimer()}
+                disabled={totalSeconds <= 0 || isFreeAtLimit}
+                className="shrink-0 rounded-2xl"
+                type="button"
+                title={isFreeAtLimit ? "FREE лимит: максимум 2 таймера" : "Добавить и сразу запустить"}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Добавить
+              </Button>
             </div>
 
-            {/* Inputs */}
-            <div className="grid grid-cols-2 gap-3 mb-4">
+            <div className="mt-4 grid grid-cols-2 gap-3">
               <div>
-                <div className="text-xs font-semibold text-slate-500 mb-2">Минуты</div>
+                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
+                  Минуты
+                </div>
                 <Input
-                  disabled={hasStarted}
                   value={minutes}
-                  onChange={(e) => {
-                    setSelectedCategory("custom");
-                    setMinutes(e.target.value.replace(/[^\d]/g, ""));
-                  }}
-                  placeholder="0"
+                  onChange={(e) => setMinutes(e.target.value)}
+                  inputMode="numeric"
+                  className="dark:bg-slate-950/40 dark:border-slate-800 dark:text-slate-100"
                 />
               </div>
               <div>
-                <div className="text-xs font-semibold text-slate-500 mb-2">Секунды</div>
+                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
+                  Секунды
+                </div>
                 <Input
-                  disabled={hasStarted}
                   value={seconds}
-                  onChange={(e) => {
-                    setSelectedCategory("custom");
-                    setSeconds(e.target.value.replace(/[^\d]/g, ""));
-                  }}
-                  placeholder="0"
+                  onChange={(e) => setSeconds(e.target.value)}
+                  inputMode="numeric"
+                  className="dark:bg-slate-950/40 dark:border-slate-800 dark:text-slate-100"
                 />
               </div>
             </div>
 
-            {/* Presets */}
-            <div className="flex flex-wrap gap-2 mb-6">
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setSoundOn((v) => !v)}
+                className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200"
+              >
+                {soundOn ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                Звук: <b>{soundOn ? "ON" : "OFF"}</b>
+              </button>
+
+              <Button type="button" variant="secondary" onClick={clearAll} className="rounded-2xl">
+                <Trash2 className="w-4 h-4 mr-2" />
+                Очистить все
+              </Button>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
               {presets.map((p) => (
                 <button
-                  key={p.label}
-                  onClick={() => applyPreset(p.m, p.s)}
-                  disabled={hasStarted}
-                  className={`px-3 py-1.5 rounded-xl text-sm border transition ${
-                    hasStarted
-                      ? "border-slate-200 text-slate-400 bg-slate-50"
-                      : "border-slate-200 hover:bg-slate-50 text-slate-700 bg-white"
+                  key={p.name}
+                  type="button"
+                  onClick={() => addTimer(p.sec, p.name)}
+                  disabled={isFreeAtLimit}
+                  className={`px-3 py-2 rounded-2xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition dark:border-slate-800 dark:bg-slate-950/20 dark:text-slate-200 dark:hover:bg-slate-900 ${
+                    isFreeAtLimit ? "opacity-50 cursor-not-allowed" : ""
                   }`}
+                  title={isFreeAtLimit ? "FREE лимит: максимум 2 таймера" : ""}
                 >
-                  {p.label}
+                  {p.name} • {formatTime(p.sec)}
                 </button>
               ))}
             </div>
-
-            {/* Controls */}
-            <div className="flex gap-3">
-              {!isRunning ? (
-                <Button className="flex-1" onClick={handleStart}>
-                  <span className="inline-flex items-center gap-2">
-                    <Play className="w-4 h-4" /> Старт
-                  </span>
-                </Button>
-              ) : (
-                <Button className="flex-1" variant="ghost" onClick={handlePause}>
-                  <span className="inline-flex items-center gap-2">
-                    <Pause className="w-4 h-4" /> Пауза
-                  </span>
-                </Button>
-              )}
-
-              <Button variant="ghost" className="flex-1" onClick={handleReset}>
-                <span className="inline-flex items-center gap-2">
-                  <RotateCcw className="w-4 h-4" /> Сбросить
-                </span>
-              </Button>
-            </div>
           </motion.div>
-        </div>
+
+          <AnimatePresence>
+            {timers.length > 0 ? (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 12 }}
+                className="mt-6 space-y-3"
+              >
+                {timers.map((t) => {
+                  const remaining = Number(t.remaining || 0);
+                  const total = Math.max(1, Number(t.totalSec || 1));
+                  const p = clamp(1 - remaining / total, 0, 1);
+
+                  return (
+                    <div
+                      key={t.id}
+                      className="bg-white dark:bg-slate-900/60 rounded-3xl shadow-xl shadow-slate-200/40 dark:shadow-black/30 border border-slate-100 dark:border-slate-800 p-5"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-extrabold text-slate-900 dark:text-slate-50 truncate">
+                            {t.label}
+                          </div>
+                          <div className="mt-1 text-sm text-slate-600 dark:text-slate-300 tabular-nums">
+                            Осталось:{" "}
+                            <b className="text-slate-900 dark:text-slate-50">{formatTime(remaining)}</b> из{" "}
+                            {formatTime(total)}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          {t.running ? (
+                            <button
+                              onClick={() => pauseTimer(t.id)}
+                              className="p-2 rounded-2xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 transition"
+                              type="button"
+                              title="Пауза"
+                            >
+                              <Pause className="w-4 h-4 text-slate-700 dark:text-slate-200" />
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => resumeTimer(t.id)}
+                              className="p-2 rounded-2xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 transition"
+                              type="button"
+                              title="Продолжить"
+                            >
+                              <Play className="w-4 h-4 text-slate-700 dark:text-slate-200" />
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => resetTimer(t.id)}
+                            className="p-2 rounded-2xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 transition"
+                            type="button"
+                            title="Сброс"
+                          >
+                            <RotateCcw className="w-4 h-4 text-slate-700 dark:text-slate-200" />
+                          </button>
+
+                          <button
+                            onClick={() => removeTimer(t.id)}
+                            className="p-2 rounded-2xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 transition"
+                            type="button"
+                            title="Удалить"
+                          >
+                            <Trash2 className="w-4 h-4 text-slate-700 dark:text-slate-200" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="mt-4">
+                        <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+                          <div
+                            className="h-full bg-emerald-500 dark:bg-emerald-300 transition-[width] duration-150 ease-linear"
+                            style={{ width: `${(p * 100).toFixed(3)}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </motion.div>
+            ) : (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 12 }}
+                className="mt-6 bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 text-sm text-slate-500 dark:text-slate-400"
+              >
+                Нет таймеров. Нажми <b>Добавить</b> или кликни по пресету.
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {history.length > 0 ? (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 12 }}
+                className="mt-6 bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 rounded-3xl p-5"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <Bell className="w-4 h-4 text-emerald-600 dark:text-emerald-300" />
+                    История (последние)
+                  </div>
+
+                  <button
+                    onClick={() => setHistory([])}
+                    className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition select-none"
+                    type="button"
+                  >
+                    Очистить
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {history.slice(0, 10).map((h) => (
+                    <button
+                      key={h.ts}
+                      type="button"
+                      onClick={() => addTimer(h.sec, h.label)}
+                      disabled={isFreeAtLimit}
+                      className={`px-3 py-2 rounded-2xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition dark:border-slate-800 dark:bg-slate-950/20 dark:text-slate-200 dark:hover:bg-slate-900 ${
+                        isFreeAtLimit ? "opacity-50 cursor-not-allowed" : ""
+                      }`}
+                      title={isFreeAtLimit ? "FREE лимит: максимум 2 таймера" : ""}
+                    >
+                      {h.label} • {formatTime(h.sec)}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+        </motion.div>
       </div>
 
-      <AlertDialog
-        open={showAlert}
-        onOpenChange={(open) => {
-          if (!open) stopAlarm();
-          setShowAlert(open);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Время вышло!</AlertDialogTitle>
-            <AlertDialogDescription>Ваш таймер был завершен.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction
-              onClick={() => {
-                stopAlarm();
-                setShowAlert(false);
-              }}
-            >
-              OK
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <audio ref={audioRef} preload="auto" src={messengerRingtone} />
     </div>
   );
 }

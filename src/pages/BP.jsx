@@ -1,272 +1,865 @@
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { Search, RotateCcw, Sparkles, CheckCircle2 } from "lucide-react";
+import SeasonalEffects from "@/components/SeasonalEffects";
+import HolidayLights from "@/components/HolidayLights";
+import {
+  Search,
+  RotateCcw,
+  Sparkles,
+  CheckCircle2,
+  Plus,
+  Minus,
+  BarChart3,
+  Calendar,
+  Download,
+  Save,
+  Lock
+} from "lucide-react";
 
-const TASKS = [
-  // Актуальные для всех способы фарма
-  { id: "online_3h", title: "3 часа в онлайне (можно выполнять многократно за день)", bpBase: 2, bpPlat: 4, group: "Актуальные" },
-  { id: "casino_zeros", title: "Нули в казино", bpBase: 2, bpPlat: 4, group: "Актуальные" },
-  { id: "construction_25", title: "25 действий на стройке", bpBase: 2, bpPlat: 4, group: "Актуальные" },
-  { id: "port_25", title: "25 действий в порту", bpBase: 2, bpPlat: 4, group: "Актуальные" },
-  { id: "mine_25", title: "25 действий в шахте", bpBase: 2, bpPlat: 4, group: "Актуальные" },
-  { id: "dance_3wins", title: "3 победы в Дэнс Баттлах", bpBase: 2, bpPlat: 4, group: "Актуальные" },
-  { id: "biz_materials", title: "Заказ материалов для бизнеса вручную (просто прожать вкл/выкл)", bpBase: 1, bpPlat: 2, group: "Актуальные" },
-  { id: "gym_20", title: "20 подходов в тренажерном зале", bpBase: 1, bpPlat: 2, group: "Актуальные" },
-  { id: "range_training", title: "Успешная тренировка в тире", bpBase: 1, bpPlat: 2, group: "Актуальные" },
-  { id: "post_10", title: "10 посылок на почте", bpBase: 1, bpPlat: 2, group: "Актуальные" },
-  { id: "rent_studio", title: "Арендовать киностудию", bpBase: 2, bpPlat: 4, group: "Актуальные" },
-  { id: "lottery_ticket", title: "Купить лотерейный билет", bpBase: 1, bpPlat: 2, group: "Актуальные" },
-  { id: "karting_race", title: "Выиграть гонку в картинге", bpBase: 1, bpPlat: 2, group: "Актуальные" },
-  { id: "farm_10actions", title: "10 действий на ферме (10 коров, 10 пшеницы и т.д. — один любой способ в день)", bpBase: 1, bpPlat: 2, group: "Актуальные" },
-  { id: "firefighter_25", title: 'Потушить 25 "огоньков" пожарным', bpBase: 1, bpPlat: 2, group: "Актуальные" },
-  { id: "treasure_1", title: "Выкопать 1 сокровище (не мусор)", bpBase: 1, bpPlat: 2, group: "Актуальные" },
-  { id: "street_race_1", title: "Проехать 1 уличную гонку (через регистрацию в телефоне, ставка минимум 1000$)", bpBase: 1, bpPlat: 2, group: "Актуальные" },
-  { id: "truck_3orders", title: "Выполнить 3 заказа дальнобойщиком", bpBase: 2, bpPlat: 4, group: "Актуальные" },
-  { id: "ems_surgery_2", title: "Два раза оплатить смену внешности у хирурга в EMS", bpBase: 2, bpPlat: 4, group: "Актуальные" },
-  { id: "cinema_add_5", title: "Добавить 5 видео в кинотеатре", bpBase: 1, bpPlat: 2, group: "Актуальные" },
-  { id: "training_complex_5wins", title: "Выиграть 5 игр в тренировочном комплексе со ставкой (от 100$)", bpBase: 1, bpPlat: 2, group: "Актуальные" },
-  { id: "arena_3wins", title: "Выиграть 3 любых игры на арене со ставкой (от 100$)", bpBase: 1, bpPlat: 2, group: "Актуальные" },
-  { id: "bus_2laps", title: "2 круга на любом маршруте автобусника", bpBase: 2, bpPlat: 4, group: "Актуальные" },
-  { id: "animals_skin_5", title: "5 раз снять 100% шкуру с животных", bpBase: 2, bpPlat: 4, group: "Актуальные" },
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid
+} from "recharts";
 
-  // НОВОЕ с 20.10.2025
-  { id: "browser_site", title: "Посетить любой сайт в браузере", bpBase: 1, bpPlat: 2, group: "Новое (20.10.2025)" },
-  { id: "brawl_channel", title: "Зайти в любой канал в Brawl", bpBase: 1, bpPlat: 2, group: "Новое (20.10.2025)" },
-  { id: "match_like", title: "Поставить лайк любой анкете в Match", bpBase: 1, bpPlat: 2, group: "Новое (20.10.2025)" },
-  { id: "dp_case_spin", title: "Прокрутить за DP серебрянный, золотой или driver кейс", bpBase: 10, bpPlat: 20, group: "Новое (20.10.2025)" },
-  { id: "pet_ball_15", title: "Кинуть мяч питомцу 15 раз", bpBase: 2, bpPlat: 4, group: "Новое (20.10.2025)" },
-  { id: "pet_commands_15", title: "15 выполненных питомцем команд", bpBase: 2, bpPlat: 4, group: "Новое (20.10.2025)" },
-  { id: "casino_wheel_bet", title: "Ставка в колесе удачи в казино (межсерверное колесо)", bpBase: 3, bpPlat: 6, group: "Новое (20.10.2025)" },
-  { id: "metro_1station", title: "Проехать 1 станцию на метро", bpBase: 2, bpPlat: 4, group: "Новое (20.10.2025)" },
-  { id: "fish_20", title: "Поймать 20 рыб", bpBase: 4, bpPlat: 8, group: "Новое (20.10.2025)" },
-  { id: "clubs_2quests", title: "Выполнить 2 квеста любых клубов", bpBase: 4, bpPlat: 8, group: "Новое (20.10.2025)" },
-  { id: "autoservice_part", title: "Починить деталь в автосервисе", bpBase: 1, bpPlat: 2, group: "Новое (20.10.2025)" },
-  { id: "basketball_2", title: "Забросить 2 мяча в баскетболе", bpBase: 1, bpPlat: 2, group: "Новое (20.10.2025)" },
-  { id: "football_2goals", title: "Забить 2 гола в футболе", bpBase: 1, bpPlat: 2, group: "Новое (20.10.2025)" },
-  { id: "armwrestling_win", title: "Победить в армрестлинге", bpBase: 1, bpPlat: 2, group: "Новое (20.10.2025)" },
-  { id: "darts_win", title: "Победить в дартс", bpBase: 1, bpPlat: 2, group: "Новое (20.10.2025)" },
-  { id: "volleyball_1min", title: "Поиграть 1 минуту в волейбол", bpBase: 1, bpPlat: 2, group: "Новое (20.10.2025)" },
-  { id: "pingpong_1min", title: "Поиграть 1 минуту в настольный теннис", bpBase: 1, bpPlat: 2, group: "Новое (20.10.2025)" },
-  { id: "tennis_1min", title: "Поиграть 1 минуту в большой теннис", bpBase: 1, bpPlat: 2, group: "Новое (20.10.2025)" },
-  { id: "casino_mafia", title: "Сыграть в мафию в казино", bpBase: 3, bpPlat: 6, group: "Новое (20.10.2025)" },
-  { id: "leasing_payment", title: "Сделать платеж по лизингу", bpBase: 1, bpPlat: 2, group: "Новое (20.10.2025)" },
-  { id: "weed_greenhouse", title: "Посадить траву в теплице", bpBase: 4, bpPlat: 8, group: "Новое (20.10.2025)" },
-  { id: "lab_painkillers", title: "Запустить переработку обезболивающих в лаборатории", bpBase: 4, bpPlat: 8, group: "Новое (20.10.2025)" },
-  { id: "airdrops_2", title: "Принять участие в двух аирдропах", bpBase: 4, bpPlat: 8, group: "Новое (20.10.2025)" },
+/**
+ * BP.jsx (server tasks) + 📈 Analytics theme
+ * ✅ Platinum переключатель
+ * ✅ Поиск + фильтр "только не выполненные"
+ * ✅ Количество (-/+) только для: "3 часа в онлайне (можно выполнять многократно за день)"
+ * ✅ Сохранение текущего состояния задач в localStorage
+ *
+ * NEW:
+ * ✅ История BP по дням (localStorage)
+ * ✅ График за месяц + быстрые метрики
+ * ✅ Экспорт CSV (история)
+ *
+ * Как работает история:
+ * - Автосейв: при изменении totalBP сохраняем "пик" за текущий день (max)
+ * - Кнопка "Зафиксировать сегодня" принудительно сохраняет значение (тоже max)
+ */
+
+
+// ===== API (for VIP gating) =====
+const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:3001";
+function getToken() {
+  try { return localStorage.getItem("auth_token"); } catch { return null; }
+}
+async function fetchMeSafe() {
+  const token = getToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${API_URL}/me`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+const LS_BP_STATE = "bp_state_v3";
+const LS_BP_HISTORY = "bp_history_v1";
+
+const REPEATABLE_ID =
+  "актуальные_для_всех_3_часа_в_онлайне_можно_выполнять_многократно_за_день";
+
+const DEFAULT_TASKS = [
+  {
+    id: "актуальные_для_всех_3_часа_в_онлайне_можно_выполнять_многократно_за_день",
+    title: "3 часа в онлайне (можно выполнять многократно за день)",
+    group: "Актуальные для всех",
+    bpBase: 2,
+    bpPlat: 4,
+    repeatable: true
+  },
+  {
+    id: "соц_мини_активности_посетить_любой_сайт_в_браузере",
+    title: "Посетить любой сайт в браузере",
+    group: "Соц/Мини-активности",
+    bpBase: 1,
+    bpPlat: 2,
+    repeatable: false
+  },
+  {
+    id: "соц_мини_активности_зайти_в_любой_канал_в_brawl",
+    title: "Зайти в любой канал в Brawl",
+    group: "Соц/Мини-активности",
+    bpBase: 1,
+    bpPlat: 2,
+    repeatable: false
+  },
+  {
+    id: "соц_мини_активности_поставить_лайк_любой_анкете_в_match",
+    title: "Поставить лайк любой анкете в Match",
+    group: "Соц/Мини-активности",
+    bpBase: 1,
+    bpPlat: 2,
+    repeatable: false
+  },
+  {
+    id: "кейсы_казино_прокрутить_за_dp_серебряный_золотой_или_driver_кейс",
+    title: "Прокрутить за DP серебряный, золотой или driver кейс",
+    group: "Кейсы/Казино",
+    bpBase: 10,
+    bpPlat: 20,
+    repeatable: false
+  },
+  {
+    id: "питомец_кинуть_мяч_питомцу_15_раз",
+    title: "Кинуть мяч питомцу 15 раз",
+    group: "Питомец",
+    bpBase: 2,
+    bpPlat: 4,
+    repeatable: false
+  },
+  {
+    id: "питомец_15_выполненных_питомцем_команд",
+    title: "15 выполненных питомцем команд",
+    group: "Питомец",
+    bpBase: 2,
+    bpPlat: 4,
+    repeatable: false
+  },
+  {
+    id: "кейсы_казино_ставка_в_колесе_удачи_в_казино_межсерверное_колесо",
+    title: "Ставка в колесе удачи в казино (межсерверное колесо)",
+    group: "Кейсы/Казино",
+    bpBase: 3,
+    bpPlat: 6,
+    repeatable: false
+  },
+  {
+    id: "транспорт_проехать_1_станцию_на_метро",
+    title: "Проехать 1 станцию на метро",
+    group: "Транспорт",
+    bpBase: 2,
+    bpPlat: 4,
+    repeatable: false
+  },
+  {
+    id: "фарм_поймать_20_рыб",
+    title: "Поймать 20 рыб",
+    group: "Фарм",
+    bpBase: 4,
+    bpPlat: 8,
+    repeatable: false
+  },
+  {
+    id: "клубы_выполнить_2_квеста_любых_клубов",
+    title: "Выполнить 2 квеста любых клубов",
+    group: "Клубы",
+    bpBase: 4,
+    bpPlat: 8,
+    repeatable: false
+  },
+  {
+    id: "автосервис_починить_деталь_в_автосервисе",
+    title: "Починить деталь в автосервисе",
+    group: "Автосервис",
+    bpBase: 1,
+    bpPlat: 2,
+    repeatable: false
+  },
+  {
+    id: "спорт_забросить_2_мяча_в_баскетболе",
+    title: "Забросить 2 мяча в баскетболе",
+    group: "Спорт",
+    bpBase: 1,
+    bpPlat: 2,
+    repeatable: false
+  },
+  {
+    id: "спорт_забить_2_гола_в_футболе",
+    title: "Забить 2 гола в футболе",
+    group: "Спорт",
+    bpBase: 1,
+    bpPlat: 2,
+    repeatable: false
+  },
+  {
+    id: "казино_победить_в_армрестлинге",
+    title: "Победить в армрестлинге",
+    group: "Казино",
+    bpBase: 1,
+    bpPlat: 2,
+    repeatable: false
+  },
+  {
+    id: "казино_победить_в_дартс",
+    title: "Победить в дартс",
+    group: "Казино",
+    bpBase: 1,
+    bpPlat: 2,
+    repeatable: false
+  }
+  // ⚠️ остальной твой список можешь оставить как есть — просто допиши ниже
 ];
 
+function safeParse(json) {
+  try {
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+function clampInt(n, min, max) {
+  const x = Number.isFinite(n) ? Math.trunc(n) : min;
+  return Math.max(min, Math.min(max, x));
+}
+
+function ymdLocal(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function startOfMonthKey(year, monthIndex0) {
+  return `${year}-${String(monthIndex0 + 1).padStart(2, "0")}`;
+}
+
+function daysInMonth(year, monthIndex0) {
+  return new Date(year, monthIndex0 + 1, 0).getDate();
+}
+
+function formatMonthTitle(year, monthIndex0) {
+  const dt = new Date(year, monthIndex0, 1);
+  return dt.toLocaleString(undefined, { month: "long", year: "numeric" });
+}
+
+function downloadText(filename, text) {
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export default function BP() {
+  const allTasks = DEFAULT_TASKS;
+
   const [query, setQuery] = useState("");
-  const [platinum, setPlatinum] = useState(false);
-  const [done, setDone] = useState(() => new Set()); // ids
+  const [isPlat, setIsPlat] = useState(false);
+  const [onlyUnchecked, setOnlyUnchecked] = useState(false);
+  const [activeGroup, setActiveGroup] = useState("Все");
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return TASKS;
-    return TASKS.filter(
-      (t) => t.title.toLowerCase().includes(q) || t.group.toLowerCase().includes(q)
-    );
-  }, [query]);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [me, setMe] = useState(null);
+  const canSeeAnalytics = !!(me && me.role && me.role !== "free");
 
-  const grouped = useMemo(() => {
-    const map = new Map();
-    for (const t of filtered) {
-      if (!map.has(t.group)) map.set(t.group, []);
-      map.get(t.group).push(t);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const m = await fetchMeSafe();
+      if (alive) setMe(m);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+
+  const [state, setState] = useState(() => {
+    const saved = safeParse(localStorage.getItem(LS_BP_STATE) || "");
+    return saved && typeof saved === "object"
+      ? saved
+      : { checked: {}, qty: {}, isPlat: false, onlyUnchecked: false, activeGroup: "Все" };
+  });
+
+  const [history, setHistory] = useState(() => {
+    const saved = safeParse(localStorage.getItem(LS_BP_HISTORY) || "");
+    return saved && typeof saved === "object" ? saved : { byDay: {}, updatedAt: null };
+  });
+
+  // hydrate controls once
+  useEffect(() => {
+    if (state && typeof state === "object") {
+      if (typeof state.isPlat === "boolean") setIsPlat(state.isPlat);
+      if (typeof state.onlyUnchecked === "boolean") setOnlyUnchecked(state.onlyUnchecked);
+      if (typeof state.activeGroup === "string") setActiveGroup(state.activeGroup);
     }
-    return Array.from(map.entries());
-  }, [filtered]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const totals = useMemo(() => {
-    let total = 0;
-    let count = 0;
-    for (const id of done) {
-      const t = TASKS.find((x) => x.id === id);
-      if (!t) continue;
-      total += platinum ? t.bpPlat : t.bpBase;
-      count += 1;
-    }
-    return { total, count };
-  }, [done, platinum]);
+  useEffect(() => {
+    const payload = {
+      checked: state.checked || {},
+      qty: state.qty || {},
+      isPlat,
+      onlyUnchecked,
+      activeGroup
+    };
+    localStorage.setItem(LS_BP_STATE, JSON.stringify(payload));
+  }, [state.checked, state.qty, isPlat, onlyUnchecked, activeGroup]);
 
-  const toggleDone = useCallback((id) => {
-    setDone((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
+  useEffect(() => {
+    localStorage.setItem(LS_BP_HISTORY, JSON.stringify(history));
+  }, [history]);
+
+  const checked = state.checked || {};
+  const qty = state.qty || {};
+
+  const toggleTask = useCallback((id) => {
+    setState((prev) => {
+      const nextChecked = { ...(prev.checked || {}), [id]: !(prev.checked || {})[id] };
+
+      // если выключили повторяемое — сбросим qty до 1
+      if (id === REPEATABLE_ID && !nextChecked[id]) {
+        const nextQty = { ...(prev.qty || {}), [id]: 1 };
+        return { ...prev, checked: nextChecked, qty: nextQty };
+      }
+
+      return { ...prev, checked: nextChecked };
     });
   }, []);
 
-  const clearAll = () => setDone(new Set());
+  const MAX_HOURS = 8;
+
+  const setTaskQty = useCallback((id, next) => {
+    const v = clampInt(next, 1, MAX_HOURS);
+    setState((prev) => ({ ...prev, qty: { ...(prev.qty || {}), [id]: v } }));
+  }, []);
+
+  const resetAll = useCallback(() => {
+    setState((prev) => ({ ...prev, checked: {}, qty: {} }));
+  }, []);
+
+  const groups = useMemo(() => {
+    const set = new Set(allTasks.map((t) => t.group));
+    return ["Все", ...Array.from(set)];
+  }, [allTasks]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return allTasks.filter((t) => {
+      if (activeGroup !== "Все" && t.group !== activeGroup) return false;
+      if (onlyUnchecked && checked[t.id]) return false;
+      if (!q) return true;
+      return t.title.toLowerCase().includes(q) || t.group.toLowerCase().includes(q);
+    });
+  }, [allTasks, query, activeGroup, onlyUnchecked, checked]);
+
+  // totalBP по всем задачам
+  const totalBP = useMemo(() => {
+    return allTasks.reduce((sum, t) => {
+      if (!checked[t.id]) return sum;
+      const bp = isPlat ? t.bpPlat : t.bpBase;
+      const mult = t.id === REPEATABLE_ID ? (qty[t.id] || 1) : 1;
+      return sum + bp * mult;
+    }, 0);
+  }, [allTasks, checked, isPlat, qty]);
+
+  const doneCount = useMemo(() => {
+    let c = 0;
+    for (const t of allTasks) if (checked[t.id]) c++;
+    return c;
+  }, [allTasks, checked]);
+
+  // prevent Space from scrolling the page (only on BP page)
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.code === "Space") {
+        const tag = document.activeElement?.tagName;
+        if (tag !== "INPUT" && tag !== "TEXTAREA") e.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, { passive: false });
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // ===== Analytics (history) =====
+  const [monthOffset, setMonthOffset] = useState(0); // 0 = текущий месяц, -1 = прошлый, ...
+
+  const monthInfo = useMemo(() => {
+    const now = new Date();
+    const dt = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
+    const year = dt.getFullYear();
+    const mi = dt.getMonth();
+    return { year, monthIndex0: mi, key: startOfMonthKey(year, mi), title: formatMonthTitle(year, mi) };
+  }, [monthOffset]);
+
+  const monthSeries = useMemo(() => {
+    const { year, monthIndex0 } = monthInfo;
+    const dim = daysInMonth(year, monthIndex0);
+    const out = [];
+    const byDay = history?.byDay || {};
+    for (let d = 1; d <= dim; d++) {
+      const key = `${year}-${String(monthIndex0 + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      const v = Number(byDay[key] || 0);
+      out.push({
+        day: String(d),
+        bp: v,
+        _key: key
+      });
+    }
+    return out;
+  }, [history, monthInfo]);
+
+  const monthTotal = useMemo(() => monthSeries.reduce((s, x) => s + (x.bp || 0), 0), [monthSeries]);
+  const daysWithData = useMemo(() => monthSeries.filter((x) => (x.bp || 0) > 0).length, [monthSeries]);
+  const monthAvg = useMemo(() => (daysWithData ? Math.round((monthTotal / daysWithData) * 10) / 10 : 0), [monthTotal, daysWithData]);
+  const bestDay = useMemo(() => {
+    let best = { day: "—", bp: 0 };
+    for (const x of monthSeries) if ((x.bp || 0) > best.bp) best = { day: x.day, bp: x.bp || 0 };
+    return best.bp ? best : { day: "—", bp: 0 };
+  }, [monthSeries]);
+
+  // Автосейв: сохраняем пик за сегодня при изменении totalBP
+  useEffect(() => {
+    const today = ymdLocal(new Date());
+    setHistory((prev) => {
+      const byDay = { ...(prev?.byDay || {}) };
+      const cur = Number(byDay[today] || 0);
+      const next = Math.max(cur, Number(totalBP || 0));
+      if (next === cur) return prev;
+      byDay[today] = next;
+      return { ...prev, byDay, updatedAt: new Date().toISOString() };
+    });
+  }, [totalBP]);
+
+  const commitToday = useCallback(() => {
+    const today = ymdLocal(new Date());
+    setHistory((prev) => {
+      const byDay = { ...(prev?.byDay || {}) };
+      const cur = Number(byDay[today] || 0);
+      const next = Math.max(cur, Number(totalBP || 0));
+      byDay[today] = next;
+      return { ...prev, byDay, updatedAt: new Date().toISOString() };
+    });
+  }, [totalBP]);
+
+  const exportHistoryCsv = useCallback(() => {
+    const byDay = history?.byDay || {};
+    const keys = Object.keys(byDay).sort();
+    const lines = ["date,bp"];
+    for (const k of keys) lines.push(`${k},${Number(byDay[k] || 0)}`);
+    downloadText(`bp_history_${ymdLocal(new Date())}.csv`, lines.join("\n"));
+  }, [history]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white pb-12">
+    <div className="pb-24 transition-colors">
+      <SeasonalEffects />
+      <HolidayLights />
+
       {/* Header */}
-      <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-8">
-        <motion.div
-          initial={{ opacity: 0, y: 18 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="max-w-3xl mx-auto"
-        >
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <div className="p-2 bg-white/20 rounded-xl">
-                  <Sparkles className="w-6 h-6" />
+      <div className="relative z-10 px-6 pt-8 pb-4">
+        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="max-w-3xl mx-auto">
+          <div className="flex items-center gap-3 mb-2">
+            <div
+              className="p-2 rounded-xl border shadow-sm
+                bg-slate-100 border-slate-200
+                dark:bg-white/10 dark:border-white/10"
+            >
+              <Sparkles className="w-6 h-6 text-indigo-600 dark:text-indigo-200" />
+            </div>
+
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">BP</h1>
+            <span className="text-xs text-slate-600 dark:text-white/60 ml-1">Задания</span>
+
+            <div className="ml-auto flex items-center gap-2">
+              {canSeeAnalytics ? (
+                <Button
+                  onClick={() => setShowAnalytics(true)}
+                  className="shadow-sm text-white border-0 bg-gradient-to-r from-indigo-600 via-purple-600 to-fuchsia-600 hover:opacity-95"
+                >
+                  <BarChart3 className="w-4 h-4 mr-2" />
+                  График
+                </Button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    disabled
+                    className="shadow-sm text-white/80 border-0 bg-white/10 cursor-not-allowed"
+                    title="График доступен только VIP/Admin"
+                  >
+                    <Lock className="w-4 h-4 mr-2" />
+                    График
+                  </Button>
+                  <Badge className="bg-pink-500/20 text-fuchsia-200 border border-fuchsia-400/30">
+                    VIP
+                  </Badge>
                 </div>
-                <h1 className="text-2xl font-bold">BP фарм</h1>
-              </div>
-              <p className="text-indigo-100">
-                Отмечай задания — приложение считает BP автоматически. Включи Platinum VIP и
-                значения переключатся.
-              </p>
-            </div>
-
-            <div className="text-right">
-              <div className="text-sm text-indigo-100">Выбрано</div>
-              <div className="text-3xl font-bold leading-none tabular-nums">
-                {totals.total} BP
-              </div>
-              <div className="text-xs text-indigo-200 mt-1">{totals.count} заданий</div>
+              )}
             </div>
           </div>
 
-          {/* Controls row */}
-          <div className="mt-5 flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
-            <div className="flex items-center gap-3 bg-white/15 rounded-2xl px-4 py-3">
-              <div className="text-sm font-semibold">Platinum VIP</div>
-              <Switch checked={platinum} onCheckedChange={setPlatinum} />
-              <div className="text-xs text-indigo-100">{platinum ? "x2 BP активен" : "обычные BP"}</div>
-            </div>
-
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                className="bg-white/15 text-white hover:bg-white/20 border border-white/15"
-                onClick={clearAll}
-                disabled={done.size === 0}
-                title="Снять все галочки"
-              >
-                <span className="inline-flex items-center gap-2">
-                  <RotateCcw className="w-4 h-4" />
-                  Сбросить всё
-                </span>
-              </Button>
-            </div>
-          </div>
-
-          {/* Search */}
-          <div className="mt-4">
-            <div className="relative">
-              <Search className="w-4 h-4 text-white/70 absolute left-3 top-1/2 -translate-y-1/2" />
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Поиск по заданиям… (например: казино, метро, рыба)"
-                className="pl-9 bg-white/15 border-white/15 text-white placeholder:text-white/60"
-              />
-            </div>
-          </div>
+          <p className="text-slate-600 dark:text-white/70">Отмечай задания, считай BP и смотри прогресс по месяцам</p>
         </motion.div>
       </div>
 
-      {/* Content */}
-      <div className="px-6 -mt-4">
+      <div className="relative z-10 px-6">
         <div className="max-w-3xl mx-auto">
-          <AnimatePresence mode="popLayout">
-            {grouped.map(([groupName, items]) => (
+          {/* Analytics Panel */}
+          <AnimatePresence>
+          {showAnalytics && (
+            <motion.div
+              className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              {/* backdrop */}
+              <div
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                onClick={() => setShowAnalytics(false)}
+              />
+
+              {/* panel */}
               <motion.div
-                key={groupName}
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.18 }}
-                className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100 p-5 mb-4"
+                className="relative w-full sm:max-w-3xl mx-auto m-0 sm:m-4"
+                initial={{ y: 30, opacity: 0, scale: 0.98 }}
+                animate={{ y: 0, opacity: 1, scale: 1 }}
+                exit={{ y: 30, opacity: 0, scale: 0.98 }}
+                transition={{ type: "spring", stiffness: 240, damping: 24 }}
+                onClick={(e) => e.stopPropagation()}
               >
-                <div className="flex items-center justify-between gap-3 mb-4">
-                  <h2 className="font-bold text-slate-900">{groupName}</h2>
-                  <Badge variant="secondary" className="rounded-xl">
-                    {items.length}
-                  </Badge>
+                <div className="absolute -top-12 right-3 sm:right-6">
+                  <Button
+                    onClick={() => setShowAnalytics(false)}
+                    className="border-0 text-white shadow-sm bg-white/10 hover:bg-white/20"
+                  >
+                    Закрыть
+                  </Button>
                 </div>
 
-                <div className="space-y-2">
-                  {items.map((t) => {
-                    const checked = done.has(t.id);
-                    const bp = platinum ? t.bpPlat : t.bpBase;
+                <div
+                className="rounded-3xl border shadow-xl overflow-hidden
+                  bg-white/80 border-slate-200/70
+                  dark:bg-white/5 dark:border-white/10"
+              >
+                <div
+                  className="p-5 border-b
+                    border-slate-200/70
+                    dark:border-white/10"
+                >
+                  <div className="flex flex-wrap items-center gap-3 justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 rounded-2xl border bg-indigo-500/10 border-indigo-400/30 dark:bg-indigo-500/15 dark:border-indigo-400/25">
+                        <BarChart3 className="w-5 h-5 text-indigo-700 dark:text-indigo-200" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold text-slate-900 dark:text-white">BP Аналитика</div>
+                        <div className="text-xs text-slate-600 dark:text-white/60">
+                          Автосейв пика за день + ручная фиксация
+                        </div>
+                      </div>
+                    </div>
 
-                    return (
-                      <motion.div
-                        key={t.id}
-                        layout
-                        onClick={() => toggleDone(t.id)}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            toggleDone(t.id);
-                          }
-                          if (e.key === " ") {
-                            e.preventDefault();
-                            if (e.repeat) return;
-                            toggleDone(t.id);
-                          }
-                        }}
-                        className={`cursor-pointer select-none flex items-start gap-3 rounded-2xl border px-4 py-3 transition ${
-                          checked
-                            ? "border-emerald-200 bg-emerald-50"
-                            : "border-slate-200 bg-white hover:bg-slate-50"
-                        }`}
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setMonthOffset((m) => m - 1)}
+                        className="rounded-xl
+                          border-slate-200 bg-white text-slate-900 hover:bg-slate-50
+                          dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+                        title="Предыдущий месяц"
                       >
-                        {/* STOP propagation so checkbox click doesn't toggle twice */}
-                        <div className="pt-0.5" onClick={(e) => e.stopPropagation()}>
-                          <Checkbox checked={checked} onCheckedChange={() => toggleDone(t.id)} />
-                        </div>
+                        ←
+                      </Button>
 
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="font-medium text-slate-900 leading-snug">{t.title}</div>
+                      <div className="px-3 py-2 rounded-xl border text-sm flex items-center gap-2
+                        bg-white border-slate-200 text-slate-900
+                        dark:bg-slate-950/40 dark:border-white/10 dark:text-white"
+                      >
+                        <Calendar className="w-4 h-4 text-slate-500 dark:text-white/60" />
+                        <span className="capitalize">{monthInfo.title}</span>
+                      </div>
 
-                            <div className="shrink-0 text-right">
-                              <motion.div
-                                key={platinum ? `plat_${t.id}` : `base_${t.id}`}
-                                initial={{ opacity: 0, y: 6 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ duration: 0.15 }}
-                                className={`text-sm font-bold tabular-nums ${
-                                  platinum ? "text-purple-700" : "text-indigo-700"
-                                }`}
-                              >
-                                +{bp} BP
-                              </motion.div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setMonthOffset((m) => Math.min(0, m + 1))}
+                        className="rounded-xl
+                          border-slate-200 bg-white text-slate-900 hover:bg-slate-50
+                          dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+                        title="Следующий месяц"
+                        disabled={monthOffset >= 0}
+                      >
+                        →
+                      </Button>
+                    </div>
+                  </div>
 
-                              {checked && (
-                                <div className="text-xs text-emerald-700 inline-flex items-center gap-1 justify-end">
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  выполнено
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </motion.div>
-                    );
-                  })}
+                  <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="rounded-2xl border p-3 bg-white border-slate-200 text-slate-900 dark:bg-white/5 dark:border-white/10 dark:text-white">
+                      <div className="text-[11px] text-slate-600 dark:text-white/60">Сумма за месяц</div>
+                      <div className="text-xl font-bold">{monthTotal}</div>
+                    </div>
+                    <div className="rounded-2xl border p-3 bg-white border-slate-200 text-slate-900 dark:bg-white/5 dark:border-white/10 dark:text-white">
+                      <div className="text-[11px] text-slate-600 dark:text-white/60">Дней с активностью</div>
+                      <div className="text-xl font-bold">{daysWithData}</div>
+                    </div>
+                    <div className="rounded-2xl border p-3 bg-white border-slate-200 text-slate-900 dark:bg-white/5 dark:border-white/10 dark:text-white">
+                      <div className="text-[11px] text-slate-600 dark:text-white/60">Среднее (только активные)</div>
+                      <div className="text-xl font-bold">{monthAvg}</div>
+                    </div>
+                    <div className="rounded-2xl border p-3 bg-white border-slate-200 text-slate-900 dark:bg-white/5 dark:border-white/10 dark:text-white">
+                      <div className="text-[11px] text-slate-600 dark:text-white/60">Лучший день</div>
+                      <div className="text-xl font-bold">
+                        {bestDay.day === "—" ? "—" : `${bestDay.day} → ${bestDay.bp}`}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Button
+                      onClick={commitToday}
+                      className="rounded-xl border-0 shadow-sm text-white
+                        bg-gradient-to-r from-indigo-600 via-purple-600 to-fuchsia-600 hover:opacity-95"
+                      title="Сохранит пик за сегодня"
+                    >
+                      <Save className="w-4 h-4 mr-2" />
+                      Зафиксировать сегодня
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      onClick={exportHistoryCsv}
+                      className="rounded-xl shadow-sm
+                        border-slate-200 bg-white text-slate-900 hover:bg-slate-50
+                        dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+                      title="Экспорт всей истории в CSV"
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      CSV история
+                    </Button>
+                  </div>
                 </div>
-              </motion.div>
-            ))}
-          </AnimatePresence>
 
-          {filtered.length === 0 && (
-            <div className="text-center text-slate-500 mt-10">
-              Ничего не найдено по запросу: <span className="font-semibold">{query}</span>
+                <div className="p-4">
+                  <div className="h-[220px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={monthSeries} margin={{ left: 8, right: 8, top: 10, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" opacity={0.18} />
+                        <XAxis dataKey="day" tick={{ fontSize: 11 }} />
+                        <YAxis tick={{ fontSize: 11 }} />
+                        <Tooltip
+                          formatter={(value) => [value, "BP"]}
+                          labelFormatter={(label) => `День ${label}`}
+                          contentStyle={{
+                            borderRadius: 14,
+                            border: "1px solid rgba(255,255,255,0.12)",
+                            background: "rgba(2,6,23,0.92)",
+                            color: "white"
+                          }}
+                        />
+                        <Bar dataKey="bp" radius={[10, 10, 0, 0]} fill="rgba(99,102,241,0.85)" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  <div className="mt-2 text-xs text-slate-600 dark:text-white/55">
+                    Совет: просто отмечай задачи — график сам сохраняет пик BP за день.
+                  </div>
+                </div>
+              </div>
+            
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+          {/* Sticky Stats Bar */}
+          <div className="sticky top-3 z-40 mb-4">
+            <div
+              className="backdrop-blur-xl rounded-2xl px-4 py-3 shadow-xl border
+                bg-white/90 text-slate-900 border-slate-200/70
+                dark:bg-slate-950/75 dark:text-white dark:border-white/10"
+            >
+              <div className="flex flex-wrap items-center gap-3 justify-between">
+                <div className="flex items-center gap-3">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-500 dark:text-emerald-400" />
+
+                  <div className="min-w-[110px]">
+                    <div className="text-[11px] leading-4 text-slate-600 dark:text-white/60">
+                      Всего BP
+                    </div>
+                    <div className="text-lg font-bold text-slate-900 dark:text-white">
+                      {totalBP}
+                    </div>
+                  </div>
+
+                  <div className="h-8 w-px bg-slate-200/70 dark:bg-white/10" />
+
+                  <div className="min-w-[110px]">
+                    <div className="text-[11px] leading-4 text-slate-600 dark:text-white/60">
+                      Отмечено
+                    </div>
+                    <div className="text-lg font-bold text-slate-900 dark:text-white">
+                      {doneCount}
+                    </div>
+                  </div>
+
+                  <div className="h-8 w-px bg-slate-200/70 dark:bg-white/10 hidden sm:block" />
+
+                  <div className="flex items-center gap-2">
+                    <Switch checked={onlyUnchecked} onCheckedChange={setOnlyUnchecked} />
+                    <span className="text-sm text-slate-700 dark:text-white/80">
+                      Только не выполненные
+                    </span>
+                  </div>
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={resetAll}
+                  className="rounded-xl shadow-sm
+                    border-slate-200 bg-white text-slate-900 hover:bg-slate-50
+                    dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10"
+                  title="Сбросить все отметки"
+                >
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                  Сбросить всё
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Controls */}
+          <div
+            className="backdrop-blur-xl rounded-3xl shadow-xl border p-5 mb-6
+              bg-white/80 border-slate-200/70
+              dark:bg-white/5 dark:border-white/10"
+          >
+            <div className="grid gap-4">
+              <div className="flex items-center gap-3">
+                <Search className="w-4 h-4 text-slate-400 dark:text-white/50 shrink-0" />
+                <Input
+                  placeholder="Поиск задания или категории..."
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="bg-white border-slate-200 text-slate-900 placeholder:text-slate-400
+                    focus-visible:ring-indigo-500/30
+                    dark:bg-slate-950/40 dark:border-white/10 dark:text-white dark:placeholder:text-white/40 dark:focus-visible:ring-indigo-500/40"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 justify-between">
+                <div className="flex items-center gap-3">
+                  <Switch checked={isPlat} onCheckedChange={setIsPlat} />
+                  <span className="text-sm text-slate-700 dark:text-white/80">Platinum BP</span>
+                </div>
+              </div>
+
+              {/* Категории */}
+              <div className="flex flex-wrap gap-2">
+                {groups.map((g) => {
+                  const active = activeGroup === g;
+                  return (
+                    <button
+                      key={g}
+                      onClick={() => setActiveGroup(g)}
+                      className={`px-3 py-1.5 rounded-xl text-sm border transition ${
+                        active
+                          ? "border-indigo-400/60 bg-indigo-500/10 text-indigo-700 dark:border-indigo-400/50 dark:bg-indigo-500/15 dark:text-indigo-100"
+                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:hover:bg-white/10"
+                      }`}
+                    >
+                      {g}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Tasks */}
+          {filtered.length === 0 ? (
+            <div
+              className="text-sm rounded-2xl p-6 border backdrop-blur-xl
+                bg-white/80 border-slate-200/70 text-slate-600
+                dark:bg-white/5 dark:border-white/10 dark:text-white/70"
+            >
+              Ничего не найдено. Попробуй другой запрос или категорию.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {filtered.map((t) => {
+                const active = !!checked[t.id];
+                const bp = isPlat ? t.bpPlat : t.bpBase;
+                const isRepeatable = t.id === REPEATABLE_ID;
+                const mult = isRepeatable ? (qty[t.id] || 1) : 1;
+
+                return (
+                  <motion.div
+                    key={t.id}
+                    layout
+                    onClick={() => toggleTask(t.id)}
+                    className={`flex items-center justify-between gap-3 p-4 rounded-2xl border transition cursor-pointer select-none backdrop-blur-xl ${
+                      active
+                        ? "bg-indigo-500/10 border-indigo-400/50 dark:bg-indigo-500/15 dark:border-indigo-400/30"
+                        : "bg-white/80 border-slate-200/70 hover:bg-slate-50 dark:bg-white/5 dark:border-white/10 dark:hover:bg-white/7"
+                    }`}
+                  >
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <Checkbox checked={active} onCheckedChange={() => toggleTask(t.id)} />
+                      </div>
+
+                      <div className="min-w-0">
+                        <div className="text-sm text-slate-900 dark:text-white break-words">{t.title}</div>
+                        <div className="text-xs text-slate-600 dark:text-white/55 mt-1">
+                          {isRepeatable ? "Можно выполнять многократно (укажи количество)" : "Одно выполнение"}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      {isRepeatable && (
+                        <div
+                          className="flex items-center gap-1 rounded-xl border px-1 py-1
+                            bg-slate-100 border-slate-200
+                            dark:bg-slate-950/30 dark:border-white/10"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setTaskQty(t.id, (qty[t.id] || 1) - 1)}
+                            className="p-1 rounded-lg hover:bg-black/5 dark:hover:bg-white/10"
+                            title="Минус"
+                          >
+                            <Minus className="w-4 h-4 text-slate-700 dark:text-white/80" />
+                          </button>
+
+                          <div className="w-8 text-center text-sm font-semibold text-slate-900 dark:text-white">
+                            {mult}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setTaskQty(t.id, (qty[t.id] || 1) + 1)}
+                            className="p-1 rounded-lg hover:bg-black/5 dark:hover:bg-white/10"
+                            title="Плюс"
+                          >
+                            <Plus className="w-4 h-4 text-slate-700 dark:text-white/80" />
+                          </button>
+                        </div>
+                      )}
+
+                      <Badge variant={active ? "default" : "secondary"} className="shrink-0">
+                        +{bp * mult} BP
+                      </Badge>
+                    </div>
+                  </motion.div>
+                );
+              })}
             </div>
           )}
         </div>
