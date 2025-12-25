@@ -1,0 +1,21 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "mhelper backend (electron)",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "dev": "node index.js",
+    "bot": "node bot.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.89.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "node-fetch": "^3.3.2",
+    "telegraf": "^4.16.3"
+  }
+}
