@@ -2,6 +2,7 @@ import "dotenv/config";
 import path from "node:path";
 import fs from "node:fs";
 import express from "express";
+import { Telegraf } from "telegraf";
 import cors from "cors";
 import jwt from "jsonwebtoken";
 import { createClient } from "@supabase/supabase-js";
@@ -16,6 +17,10 @@ const PORT = Number(process.env.PORT || 3001);
 const JWT_SECRET = process.env.JWT_SECRET || "CHANGE_ME";
 const BOT_API_KEY = process.env.BOT_API_KEY || "";
 const TG_CODE_TTL_MIN = Number(process.env.TG_CODE_TTL_MIN || 5);
+const BOT_TOKEN = process.env.BOT_TOKEN || "";
+const BOT_BRAND = process.env.BOT_BRAND || "MHELPER";
+const BACKEND_URL = process.env.BACKEND_URL || process.env.RENDER_EXTERNAL_URL || "";
+const TG_WEBHOOK_PATH = process.env.TG_WEBHOOK_PATH || "/tg/webhook";
 
 
 const corsOptions = {
@@ -120,6 +125,10 @@ const ST = {
 
 function detectSmallTalkIntent(text) {
   const raw = normalizeChatText(text);
+  // Если это похоже на номер пункта/статьи (например 12.8 / 2/7 / 12.7.1*), то это НЕ smalltalk.
+  if (/^\d{1,3}(?:[.\-/]\d{1,3}(?:[.\-/]\d{1,3})?)?(\*{0,3})$/.test(stripEdgePunct(raw))) {
+    return null;
+  }
   const t = lc(stripEdgePunct(raw));
 
   // Very short and non-informational -> treat as smalltalk
@@ -683,83 +692,12 @@ function pickSnippetsForceLawFiles() {
 }
 
 // =====================================================
-// 🤖 AI: Local Ollama (HTTP)
 // =====================================================
+// 🤖 AI: Ollama REMOVED
+// - По просьбе: полностью отключаем Ollama.
+// - /api/ai/chat возвращает только найденные фрагменты из rules (без генерации).
 // =====================================================
-// 🤖 AI: Ollama REMOVED (rules-only mode)
-// =====================================================
-const AI_MODE = "rules_only";
-// Safer intent filter: block only harmful "how to"
-const AI_BLOCK_INTENT = [
-  /(?:как|how)\s+(?:взломать|hack|ddos|dox|докс|обойти|bypass|обойти\s+закон|evade)/i,
-  /(?:как|how)\s+(?:сделать|make|изготовить)\s+(?:бомб|взрыв|explos)/i,
-  /(?:как|how)\s+(?:купить|достать|get)\s+(?:наркот|drug|оружи|gun|патрон|ammo)\b/i
-];
-function aiIsBlocked(text) {
-  const t = String(text || "");
-  return AI_BLOCK_INTENT.some((re) => re.test(t));
-}
-
-
-// =====================================================
-// 🧠 RAG store (embeddings) — OPTIONAL but recommended
-// =====================================================
-let RAG = { meta: { created_at: null, model: null, count: 0 }, chunks: [] };
-
-function ragLoad() {
-  try {
-    if (fs.existsSync(RAG_STORE_PATH)) {
-      const raw = fs.readFileSync(RAG_STORE_PATH, "utf8");
-      const j = JSON.parse(raw);
-      if (j?.chunks?.length) RAG = j;
-    }
-  } catch (e) {
-    console.error("RAG load error:", e?.message || e);
-  }
-}
-function ragSave() {
-  fs.writeFileSync(RAG_STORE_PATH, JSON.stringify(RAG, null, 2), "utf8");
-}
-ragLoad();
-
-function cosine(a, b) {
-  let dot = 0, na = 0, nb = 0;
-  const n = Math.min(a.length, b.length);
-  for (let i = 0; i < n; i++) {
-    const x = a[i] || 0;
-    const y = b[i] || 0;
-    dot += x * y;
-    na += x * x;
-    nb += y * y;
-  }
-  if (!na || !nb) return 0;
-  return dot / (Math.sqrt(na) * Math.sqrt(nb));
-}
-
-function buildContextFromTop(top) {
-  return top.map((x) => {
-    const codeLabel = x.code === "UK" ? "УК" : x.code === "AK" ? "АК" : "—";
-    return `\n\n--- REF: ${x.ref}${x.stars || ""} [${codeLabel}] FILE: ${x.file} TITLE: ${x.title} ---\n${x.text}`;
-  }).join("").trim();
-}
-
-// =====================================================
-// AI endpoints: health / reload / reindex / chat
-// =====================================================
-app.get("/api/ai/health", (_req, res) => {
-  return res.json({ ok: true, mode: AI_MODE });
-});
-
-
-app.post("/api/ai/reload_rules", (_req, res) => {
-  reloadRules();
-  res.json({ ok: true, refs: REF_INDEX.size, chunks: RULE_CHUNKS.length });
-});
-
-app.post("/api/ai/reindex", (_req, res) => {
-  return res.status(410).json({ ok: false, error: "OLLAMA_REMOVED", mode: AI_MODE });
-});
-
+const OLLAMA_ENABLED = false;
 
 app.post("/api/ai/chat", async (req, res) => {
   try {
@@ -774,54 +712,101 @@ app.post("/api/ai/chat", async (req, res) => {
     const userText = String(message || "").trim();
     if (!userText) return res.status(400).json({ error: "NO_USER_MESSAGE" });
 
-    if (aiIsBlocked(userText)) {
-      return res.json({ reply: "Не могу помочь с этим запросом.", mode: AI_MODE });
+    // ✅ Smalltalk / greetings / chatty messages should NOT go to rules/RAG
+    const stHit = detectSmallTalkIntent(userText);
+    if (stHit.intent && stHit.score >= 0.55) {
+      return res.json({ reply: smallTalkReply(stHit.intent, userText) });
     }
+
+
+    if (/^(прив(ет|)\b|hello\b|hi\b|йо\b|здарова\b|ку\b|yo\b|доброе\s+утро\b|добрый\s+день\b|добрый\s+вечер\b)$/i.test(userText)) {
+      return res.json({ reply: "Привет! Я VIP AI-помощник по памятке/правилам. Напиши номер статьи (например: 12.8 УК / 6.8 АК) или вопрос словами — отвечу со ссылкой 🙂" });
+    }
+
+    const brief = isBriefAsked(userText);
+    const pick = extractChoiceSuffix(userText);
 
     const parsed = normalizeQuery(userText);
     const refKey = parsed.ref ? normalizeRefKey(parsed.ref) : null;
 
-    // 1) Exact пункт/статья
+    // 1) Exact ref answer
     if (refKey) {
       const all = REF_INDEX.get(refKey) || [];
-      if (all.length) return res.json(explainRef(all, refKey, Boolean(req.body?.brief), parsed.codeHint));
-      return res.json({ reply: `В базе нет пункта ${refKey}.`, mode: AI_MODE });
+      if (pick && pick.ref === refKey && all.length) {
+        const idx = Math.max(0, Math.min(all.length - 1, pick.choice - 1));
+        return res.json(explainRef([all[idx]], refKey, brief, parsed.codeHint));
+      }
+      if (all.length) return res.json(explainRef(all, refKey, brief, parsed.codeHint));
+      return res.json({ reply: `В правилах/памятке нет пункта ${refKey}. Проверь rules/*.txt и нажми "Обновить"/"Reindex".` });
     }
 
-    // 2) Keyword snippets (без Ollama)
-    const baseQ = parsed.cleanText || userText;
-    const context =
-      pickSnippetsFromEntriesFiltered(baseQ, LAW_FILES, parsed.codeHint) ||
-      pickSnippetsFromEntries(baseQ, parsed.codeHint) ||
-      "";
-
-    if (!context || context.trim().length < 40) {
+    if (aiIsBlocked(userText)) {
       return res.json({
-        reply:
-          "Не нашёл точный ответ в памятке/правилах. Попробуй указать номер пункта (например: 12.8 УК / 6.8 АК) или уточни формулировку.",
-        mode: AI_MODE
+        reply: "⛔ Я не могу помогать с инструкциями для вреда/обхода закона. Могу помочь: объяснить статьи, наказания и порядок действий — строго по твоей базе."
       });
     }
 
-    return res.json({
-      reply:
-        "Я не использую Ollama. Вот что нашёл в базе по твоему запросу:\n" +
-        context +
-        "\n\nИсточник: см. REF/FILE в тексте выше.",
-      mode: AI_MODE
-    });
+    // 🧠 follow-up memory
+    const mk = memKey(req);
+    const mem = memGet(mk);
+    const keys = extractTopicKeywords(userText);
+    if (keys.length) memSet(mk, { topic: keys.join(", "), keywords: keys });
+
+    const baseQ = parsed.cleanText || userText;
+    const qForSearch = isShortFollowup(userText) && mem?.topic ? `${baseQ} (тема: ${mem.topic})` : baseQ;
+
+    // 2) RAG semantic retrieval if built
+    let context = "";
+
+    if (RAG?.chunks?.length) {
+      const qVec = await ollamaEmbed(qForSearch);
+
+      let scored = RAG.chunks.map((c) => ({ s: cosine(qVec, c.vec || []), c }));
+
+      // Law file bonus
+      scored = scored.map(({ s, c }) => {
+        const isLaw = LAW_FILES.includes(String(c.file || "").toLowerCase());
+        return { s: s + (isLaw ? 0.05 : 0), c };
+      });
+
+      // УК/АК hint preference
+      if (parsed.codeHint) {
+        scored = scored.map(({ s, c }) => {
+          if (!c.code) return { s, c };
+          return { s: c.code === parsed.codeHint ? s + 0.03 : s - 0.02, c };
+        });
+      }
+
+      scored.sort((a, b) => b.s - a.s);
+
+      const best = scored[0]?.s || 0;
+
+      // if best is too low, we fallback to keyword snippets
+      if (best >= 0.20) {
+        const top = scored.slice(0, 6).map((x) => x.c);
+        context = buildContextFromTop(top);
+      }
+    }
+
+    // 3) fallback keyword snippets (your old approach)
+    if (!context) {
+      context = pickSnippetsFromEntriesFiltered(qForSearch, LAW_FILES, parsed.codeHint);
+      if (!context) context = pickSnippetsFromEntries(qForSearch, parsed.codeHint);
+      if ((!context || context.length < 30) && shouldForceLawFiles(userText)) {
+        const forced = pickSnippetsForceLawFiles();
+        if (forced) context = forced;
+      }
+    }
+    // NOTE: Ollama удалена. Возвращаем только найденные фрагменты (с источником).
+    const snippetText = context ? context : "В памятке/правилах этого не найдено.";
+    const short = snippetText.length > 3500 ? snippetText.slice(0, 3500) + "…" : snippetText;
+    return res.json({ reply: short, model: null, ollama: "OFF" });
+
   } catch (e) {
     console.error("AI CHAT ERROR:", e);
     return res.status(500).json({ error: "AI_ERROR", message: e?.message || String(e) });
   }
 });
-
-
-// Debug: check ollama + model list
-app.get("/api/ai/ollama", (_req, res) => {
-  return res.json({ enabled: false, mode: AI_MODE });
-});
-
 
 // =====================================================
 // 🤖 BOT: request code
@@ -1629,7 +1614,148 @@ app.get("/api/rules/ref/:ref", (req, res) => {
 // =====================================================
 // 🚀 Start
 // =====================================================
+
+// =====================================================
+// 🤖 TELEGRAM BOT (Render-friendly webhook)
+// - On Render you must use WEBHOOK (not long-polling), иначе после выключения локальной консоли бот "умирает".
+// - Требуется env: BOT_TOKEN и BACKEND_URL (например: https://resale-helper-app.onrender.com)
+// =====================================================
+let tgBot = null;
+
+function hasPublicUrl() {
+  const u = String(BACKEND_URL || "").trim();
+  return /^https?:\/\//i.test(u);
+}
+
+function normalizeBaseUrl(u) {
+  return String(u || "").trim().replace(/\/+$/g, "");
+}
+
+function setupTelegramBotRoutes() {
+  if (!BOT_TOKEN) {
+    console.log("🤖 Telegram bot: BOT_TOKEN is empty -> bot disabled");
+    return;
+  }
+
+  tgBot = new Telegraf(BOT_TOKEN);
+
+  tgBot.start(async (ctx) => {
+    await ctx.reply(
+      `✅ ${BOT_BRAND} Bot online.\n\n` +
+      `Если ты тут по MHELPER: напиши вопрос (или "12.8 УК"), а в приложении пользуйся Telegram-login кодами как обычно.`
+    );
+  });
+
+  tgBot.command("ping", (ctx) => ctx.reply("pong ✅"));
+
+  tgBot.command("code", async (ctx) => {
+    try {
+      const tgId = String(ctx.from?.id || "").trim();
+      if (!tgId) return ctx.reply("Не вижу твой Telegram ID 😕");
+
+      // 1) reuse existing valid code (anti-spam)
+      const { data: existing, error: exErr } = await supabase
+        .from("tg_login_codes")
+        .select("*")
+        .eq("telegram_id", tgId)
+        .eq("used", false)
+        .gt("expires_at", new Date().toISOString())
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (exErr) return ctx.reply("Ошибка базы при получении кода.");
+
+      if (existing?.[0]?.code) {
+        return ctx.reply(`🔐 Код входа: ${existing[0].code}\n⏳ Действует до: ${existing[0].expires_at}`);
+      }
+
+      // 2) generate unique code
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      const gen = (len = 6) => Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+
+      let code = gen(6);
+      for (let i = 0; i < 6; i++) {
+        const { data: clash, error: cErr } = await supabase
+          .from("tg_login_codes")
+          .select("id")
+          .eq("code", code)
+          .limit(1);
+        if (cErr) return ctx.reply("Ошибка базы при создании кода.");
+        if (!clash?.length) break;
+        code = gen(6);
+      }
+
+      const expiresAt = new Date(Date.now() + TG_CODE_TTL_MIN * 60 * 1000).toISOString();
+
+      const { data: ins, error: insErr } = await supabase
+        .from("tg_login_codes")
+        .insert({ telegram_id: tgId, code: code.toUpperCase(), expires_at: expiresAt, used: false })
+        .select()
+        .single();
+
+      if (insErr) return ctx.reply("Ошибка базы при сохранении кода.");
+
+      return ctx.reply(`🔐 Код входа: ${ins.code}\n⏳ Действует до: ${ins.expires_at}`);
+    } catch (_e) {
+      return ctx.reply("Не смог сделать код. Попробуй позже.");
+    }
+  });
+
+
+  // simple text echo/help
+  tgBot.on("text", async (ctx) => {
+    const text = String(ctx.message?.text || "").trim();
+    if (!text) return;
+    if (/^ping$/i.test(text)) return ctx.reply("pong ✅");
+
+    // Для вопросов по правилам — отправляем в твой же API /api/ai/chat (если он поднят без Ollama — вернёт сниппеты)
+    try {
+      const base = normalizeBaseUrl(BACKEND_URL) || `http://127.0.0.1:${PORT}`;
+      const r = await fetch(`${base}/api/ai/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text })
+      });
+      const j = await r.json().catch(() => ({}));
+      const reply = String(j?.reply || "").trim();
+      if (reply) return ctx.reply(reply.slice(0, 3900)); // лимит TG ~4096
+      return ctx.reply("Не нашёл ответ. Попробуй переформулировать.");
+    } catch (e) {
+      return ctx.reply("Сервер AI сейчас недоступен. Попробуй позже.");
+    }
+  });
+
+  // webhook endpoint for Telegram updates
+  app.use(tgBot.webhookCallback(TG_WEBHOOK_PATH));
+
+  console.log(`🤖 Telegram bot route mounted: POST ${TG_WEBHOOK_PATH}`);
+}
+
+async function ensureWebhook() {
+  if (!tgBot) return;
+  if (!hasPublicUrl()) {
+    console.log("🤖 Telegram bot: BACKEND_URL/RENDER_EXTERNAL_URL is empty -> webhook not set");
+    return;
+  }
+  const base = normalizeBaseUrl(BACKEND_URL);
+  const fullUrl = `${base}${TG_WEBHOOK_PATH}`;
+  try {
+    // important: Telegram must reach your Render URL
+    await tgBot.telegram.setWebhook(fullUrl);
+    const info = await tgBot.telegram.getWebhookInfo();
+    console.log(`🤖 Telegram webhook set: ${fullUrl}`);
+    console.log(`🤖 Webhook info: url=${info?.url || "-"} pending=${info?.pending_update_count ?? "-"}`);
+  } catch (e) {
+    console.error("🤖 setWebhook error:", e?.message || e);
+  }
+}
+
+setupTelegramBotRoutes();
+
+
 app.listen(PORT, "0.0.0.0", () => {
+  // init TG webhook (Render)
+  ensureWebhook();
   console.log(`✅ Backend listening on port ${PORT}`);
   console.log(`📚 rules dir: ${RULES_DIR} | indexed refs: ${REF_INDEX.size} | chunks: ${RULE_CHUNKS.length}`);
   console.log(`🧠 RAG store: ${RAG_STORE_PATH} | vectors: ${RAG?.chunks?.length || 0}`);
