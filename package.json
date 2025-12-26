@@ -1,12 +1,13 @@
 {
   "name": "mhelper",
   "private": true,
-  "version": "0.2.7",
+  "version": "0.3.0",
   "description": "MHELPER desktop app",
   "author": "mobsi",
   "type": "module",
   "main": "src/electron/main.cjs",
   "scripts": {
+    "electron:build": "electron-builder",
     "chat": "cd src/electron/chat && node chat.js",
     "servers": "concurrently \"cd src/electron/backend && node index.js\" \"cd src/electron/backend && node bot.cjs\"",
     "full": "concurrently \"npm run dev\" \"npm run servers\"",
@@ -66,7 +67,7 @@
     "artifactName": "MHELPER.exe",
     "win": {
       "target": "nsis",
-      "icon": "build/icons/icon.ico",
+      "icon": "build/icon.ico",
       "executableName": "MHELPER"
     },
     "nsis": {

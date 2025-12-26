@@ -382,8 +382,8 @@ function createWindow() {
     }
   });
 
-  if (isDev) mainWindow.loadURL("http://localhost:5173");
-  else mainWindow.loadFile(path.join(__dirname, "../../dist/index.html"));
+  // 🔁 Вот это строка ЗАМЕНИЛА условие isDev
+  mainWindow.loadURL("https://resale-helper-app-1.onrender.com/");
 
   setupAutoUpdater();
   setupPolicyHandler();
@@ -393,7 +393,6 @@ function createWindow() {
     mainWindow.center();
     mainWindow.show();
 
-    // policy is only for informing/blocking features; updater runs independently
     const payload = await enforcePolicyIfNeeded();
     try { mainWindow.webContents.send("update:policy", payload); } catch { }
 
@@ -407,6 +406,7 @@ function createWindow() {
     }
   });
 }
+
 
 // ====== lifecycle ======
 app.whenReady().then(() => {
