@@ -2,7 +2,6 @@ import "dotenv/config";
 import path from "node:path";
 import fs from "node:fs";
 import express from "express";
-import { Telegraf } from "telegraf";
 import cors from "cors";
 import jwt from "jsonwebtoken";
 import { createClient } from "@supabase/supabase-js";
@@ -17,10 +16,6 @@ const PORT = Number(process.env.PORT || 3001);
 const JWT_SECRET = process.env.JWT_SECRET || "CHANGE_ME";
 const BOT_API_KEY = process.env.BOT_API_KEY || "";
 const TG_CODE_TTL_MIN = Number(process.env.TG_CODE_TTL_MIN || 5);
-const BOT_TOKEN = process.env.BOT_TOKEN || "";
-const BOT_BRAND = process.env.BOT_BRAND || "MHELPER";
-const BACKEND_URL = process.env.BACKEND_URL || process.env.RENDER_EXTERNAL_URL || "";
-const TG_WEBHOOK_PATH = process.env.TG_WEBHOOK_PATH || "/tg/webhook";
 
 
 const corsOptions = {
@@ -690,36 +685,10 @@ function pickSnippetsForceLawFiles() {
 // =====================================================
 // 🤖 AI: Local Ollama (HTTP)
 // =====================================================
-const OLLAMA_HOST = process.env.OLLAMA_HOST;
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL;
-
-const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL;
-const OLLAMA_ENABLED = (process.env.OLLAMA_ENABLED ?? "1") !== "0" && Boolean(OLLAMA_HOST && OLLAMA_MODEL);
-async function ollamaGenerate({ model, system, prompt }) {
-  if (typeof OLLAMA_ENABLED !== "undefined" && !OLLAMA_ENABLED) throw new Error("OLLAMA_DISABLED");
-  const r = await fetch(`${OLLAMA_HOST}/api/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, system, prompt, stream: false })
-  });
-  const t = await r.text();
-  if (!r.ok) throw new Error(`Ollama /api/generate failed: ${r.status} ${t}`);
-  try { return JSON.parse(t); } catch { return { response: t }; }
-}
-
-async function ollamaEmbed(text) {
-  if (typeof OLLAMA_ENABLED !== "undefined" && !OLLAMA_ENABLED) throw new Error("OLLAMA_DISABLED");
-  const r = await fetch(`${OLLAMA_HOST}/api/embeddings`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: OLLAMA_EMBED_MODEL, prompt: String(text || "") })
-  });
-  const t = await r.text();
-  if (!r.ok) throw new Error(`Ollama /api/embeddings failed: ${r.status} ${t}`);
-  const j = JSON.parse(t);
-  return j?.embedding || [];
-}
-
+// =====================================================
+// 🤖 AI: Ollama REMOVED (rules-only mode)
+// =====================================================
+const AI_MODE = "rules_only";
 // Safer intent filter: block only harmful "how to"
 const AI_BLOCK_INTENT = [
   /(?:как|how)\s+(?:взломать|hack|ddos|dox|докс|обойти|bypass|обойти\s+закон|evade)/i,
@@ -731,10 +700,11 @@ function aiIsBlocked(text) {
   return AI_BLOCK_INTENT.some((re) => re.test(t));
 }
 
+
 // =====================================================
 // 🧠 RAG store (embeddings) — OPTIONAL but recommended
 // =====================================================
-let RAG = { meta: { created_at: null, model: (typeof OLLAMA_EMBED_MODEL === "string" ? OLLAMA_EMBED_MODEL : null), count: 0 }, chunks: [] };
+let RAG = { meta: { created_at: null, model: null, count: 0 }, chunks: [] };
 
 function ragLoad() {
   try {
@@ -776,72 +746,20 @@ function buildContextFromTop(top) {
 // =====================================================
 // AI endpoints: health / reload / reindex / chat
 // =====================================================
-app.get("/api/ai/health", (_req, res) =>
-  res.json({
-    ok: true,
-    ollama: OLLAMA_HOST,
-    model: (typeof OLLAMA_MODEL === "string" ? OLLAMA_MODEL : null),
-    embed_model: (typeof OLLAMA_EMBED_MODEL === "string" ? OLLAMA_EMBED_MODEL : null),
-    rulesDir: RULES_DIR,
-    rulesFile: RULES_FILE,
-    indexedRefs: REF_INDEX.size,
-    rag: {
-      store: RAG_STORE_PATH,
-      count: RAG?.chunks?.length || 0,
-      created_at: RAG?.meta?.created_at || null,
-      model: RAG?.meta?.model || null
-    }
-  })
-);
+app.get("/api/ai/health", (_req, res) => {
+  return res.json({ ok: true, mode: AI_MODE });
+});
+
 
 app.post("/api/ai/reload_rules", (_req, res) => {
   reloadRules();
   res.json({ ok: true, refs: REF_INDEX.size, chunks: RULE_CHUNKS.length });
 });
 
-app.post("/api/ai/reindex", async (_req, res) => {
-  try {
-    if (!OLLAMA_ENABLED) {
-      return res.status(400).json({ error: "OLLAMA_DISABLED", message: "Ollama отключена (OLLAMA_ENABLED=0 или нет OLLAMA_HOST/OLLAMA_MODEL)." });
-    }
-    reloadRules();
-    if (!RULE_CHUNKS.length) {
-      return res.status(400).json({ error: "NO_RULES", message: `No rules chunks found in ${RULES_DIR}` });
-    }
-
-    console.log(`🧠 Reindex start: chunks=${RULE_CHUNKS.length} embed_model=${OLLAMA_EMBED_MODEL}`);
-
-    const out = new Array(RULE_CHUNKS.length);
-    let next = 0;
-
-    async function worker() {
-      while (true) {
-        const i = next++;
-        if (i >= RULE_CHUNKS.length) return;
-        const c = RULE_CHUNKS[i];
-        const textForVec = `${c.title}\n${c.ref}${c.stars || ""}\n${c.text}`;
-        const vec = await ollamaEmbed(textForVec);
-        out[i] = { ...c, vec };
-        if ((i + 1) % 25 === 0) console.log(`🧠 Reindex progress: ${i + 1}/${RULE_CHUNKS.length}`);
-      }
-    }
-
-    // 2 workers = быстрее, но не убивает Ollama
-    await Promise.all([worker(), worker()]);
-
-    RAG = {
-      meta: { created_at: new Date().toISOString(), model: OLLAMA_EMBED_MODEL, count: out.length },
-      chunks: out
-    };
-    ragSave();
-
-    console.log(`🧠 Reindex done: vectors=${out.length} -> ${RAG_STORE_PATH}`);
-    res.json({ ok: true, count: out.length, store: RAG_STORE_PATH, created_at: RAG.meta.created_at });
-  } catch (e) {
-    console.error("REINDEX ERROR:", e);
-    res.status(500).json({ error: "REINDEX_FAILED", message: e?.message || String(e) });
-  }
+app.post("/api/ai/reindex", (_req, res) => {
+  return res.status(410).json({ ok: false, error: "OLLAMA_REMOVED", mode: AI_MODE });
 });
+
 
 app.post("/api/ai/chat", async (req, res) => {
   try {
@@ -856,139 +774,54 @@ app.post("/api/ai/chat", async (req, res) => {
     const userText = String(message || "").trim();
     if (!userText) return res.status(400).json({ error: "NO_USER_MESSAGE" });
 
-    // ✅ Smalltalk / greetings / chatty messages should NOT go to rules/RAG
-    const stHit = detectSmallTalkIntent(userText);
-    if (stHit.intent && stHit.score >= 0.55) {
-      return res.json({ reply: smallTalkReply(stHit.intent, userText) });
+    if (aiIsBlocked(userText)) {
+      return res.json({ reply: "Не могу помочь с этим запросом.", mode: AI_MODE });
     }
-
-
-    if (/^(прив(ет|)\b|hello\b|hi\b|йо\b|здарова\b|ку\b|yo\b|доброе\s+утро\b|добрый\s+день\b|добрый\s+вечер\b)$/i.test(userText)) {
-      return res.json({ reply: "Привет! Я VIP AI-помощник по памятке/правилам. Напиши номер статьи (например: 12.8 УК / 6.8 АК) или вопрос словами — отвечу со ссылкой 🙂" });
-    }
-
-    const brief = isBriefAsked(userText);
-    const pick = extractChoiceSuffix(userText);
 
     const parsed = normalizeQuery(userText);
     const refKey = parsed.ref ? normalizeRefKey(parsed.ref) : null;
 
-    // 1) Exact ref answer
+    // 1) Exact пункт/статья
     if (refKey) {
       const all = REF_INDEX.get(refKey) || [];
-      if (pick && pick.ref === refKey && all.length) {
-        const idx = Math.max(0, Math.min(all.length - 1, pick.choice - 1));
-        return res.json(explainRef([all[idx]], refKey, brief, parsed.codeHint));
-      }
-      if (all.length) return res.json(explainRef(all, refKey, brief, parsed.codeHint));
-      return res.json({ reply: `В правилах/памятке нет пункта ${refKey}. Проверь rules/*.txt и нажми "Обновить"/"Reindex".` });
+      if (all.length) return res.json(explainRef(all, refKey, Boolean(req.body?.brief), parsed.codeHint));
+      return res.json({ reply: `В базе нет пункта ${refKey}.`, mode: AI_MODE });
     }
 
-    if (aiIsBlocked(userText)) {
-      return res.json({
-        reply: "⛔ Я не могу помогать с инструкциями для вреда/обхода закона. Могу помочь: объяснить статьи, наказания и порядок действий — строго по твоей базе."
-      });
-    }
-
-    // 🧠 follow-up memory
-    const mk = memKey(req);
-    const mem = memGet(mk);
-    const keys = extractTopicKeywords(userText);
-    if (keys.length) memSet(mk, { topic: keys.join(", "), keywords: keys });
-
+    // 2) Keyword snippets (без Ollama)
     const baseQ = parsed.cleanText || userText;
-    const qForSearch = isShortFollowup(userText) && mem?.topic ? `${baseQ} (тема: ${mem.topic})` : baseQ;
+    const context =
+      pickSnippetsFromEntriesFiltered(baseQ, LAW_FILES, parsed.codeHint) ||
+      pickSnippetsFromEntries(baseQ, parsed.codeHint) ||
+      "";
 
-    // 2) RAG semantic retrieval if built
-    let context = "";
-
-    if (RAG?.chunks?.length) {
-      const qVec = await ollamaEmbed(qForSearch);
-
-      let scored = RAG.chunks.map((c) => ({ s: cosine(qVec, c.vec || []), c }));
-
-      // Law file bonus
-      scored = scored.map(({ s, c }) => {
-        const isLaw = LAW_FILES.includes(String(c.file || "").toLowerCase());
-        return { s: s + (isLaw ? 0.05 : 0), c };
+    if (!context || context.trim().length < 40) {
+      return res.json({
+        reply:
+          "Не нашёл точный ответ в памятке/правилах. Попробуй указать номер пункта (например: 12.8 УК / 6.8 АК) или уточни формулировку.",
+        mode: AI_MODE
       });
-
-      // УК/АК hint preference
-      if (parsed.codeHint) {
-        scored = scored.map(({ s, c }) => {
-          if (!c.code) return { s, c };
-          return { s: c.code === parsed.codeHint ? s + 0.03 : s - 0.02, c };
-        });
-      }
-
-      scored.sort((a, b) => b.s - a.s);
-
-      const best = scored[0]?.s || 0;
-
-      // if best is too low, we fallback to keyword snippets
-      if (best >= 0.20) {
-        const top = scored.slice(0, 6).map((x) => x.c);
-        context = buildContextFromTop(top);
-      }
     }
 
-    // 3) fallback keyword snippets (your old approach)
-    if (!context) {
-      context = pickSnippetsFromEntriesFiltered(qForSearch, LAW_FILES, parsed.codeHint);
-      if (!context) context = pickSnippetsFromEntries(qForSearch, parsed.codeHint);
-      if ((!context || context.length < 30) && shouldForceLawFiles(userText)) {
-        const forced = pickSnippetsForceLawFiles();
-        if (forced) context = forced;
-      }
-    }
-
-    const system =
-      process.env.AI_SYSTEM_PROMPT ||
-      `Ты — помощник по памятке/правилам. Отвечай СТРОГО по тексту из контекста.
-ЖЁСТКИЕ ПРАВИЛА:
-- НЕ придумывай статьи/пункты/штрафы.
-- Если нет прямого ответа в контексте — скажи: "В памятке/правилах этого нет" и попроси уточнить.
-- Всегда добавляй "Источник:" и укажи REF/FILE (как в контексте).
-ФОРМАТ: 2-6 коротких предложений, без воды.`;
-
-    const prompt = `ВОПРОС: ${userText}
-
-КОНТЕКСТ:
-${context || "(контекст пуст — нет релевантных фрагментов)"}
-
-ОТВЕТ (со ссылкой на источник):`;
-
-    if (!OLLAMA_ENABLED) {
-      // Fallback: return top snippets directly (no generation)
-      const snippetText = context ? context : "В памятке/правилах этого не найдено.";
-      const short = snippetText.length > 2500 ? snippetText.slice(0, 2500) + "…" : snippetText;
-      return res.json({ reply: short, model: null, ollama: "OFF" });
-    }
-
-    const result = await ollamaGenerate({ model: (typeof OLLAMA_MODEL === "string" ? OLLAMA_MODEL : null), system, prompt });
-
-    const reply =
-      (result?.response || "").trim() ||
-      "Не нашёл этого в памятке/правилах. Уточни формулировку или добавь текст в rules/*.txt и сделай reindex.";
-
-    return res.json({ reply, model: (typeof OLLAMA_MODEL === "string" ? OLLAMA_MODEL : null) });
+    return res.json({
+      reply:
+        "Я не использую Ollama. Вот что нашёл в базе по твоему запросу:\n" +
+        context +
+        "\n\nИсточник: см. REF/FILE в тексте выше.",
+      mode: AI_MODE
+    });
   } catch (e) {
     console.error("AI CHAT ERROR:", e);
     return res.status(500).json({ error: "AI_ERROR", message: e?.message || String(e) });
   }
 });
 
+
 // Debug: check ollama + model list
-app.get("/api/ai/ollama", async (_req, res) => {
-  try {
-    const r = await fetch(`${OLLAMA_HOST}/api/tags`);
-    const t = await r.text();
-    if (!r.ok) return res.status(500).json({ error: "OLLAMA_TAGS_ERROR", message: t });
-    return res.type("application/json").send(t);
-  } catch (e) {
-    return res.status(500).json({ error: "OLLAMA_UNREACHABLE", message: e?.message || String(e) });
-  }
+app.get("/api/ai/ollama", (_req, res) => {
+  return res.json({ enabled: false, mode: AI_MODE });
 });
+
 
 // =====================================================
 // 🤖 BOT: request code
@@ -1796,100 +1629,8 @@ app.get("/api/rules/ref/:ref", (req, res) => {
 // =====================================================
 // 🚀 Start
 // =====================================================
-
-// =====================================================
-// 🤖 TELEGRAM BOT (Render-friendly webhook)
-// - On Render you must use WEBHOOK (not long-polling), иначе после выключения локальной консоли бот "умирает".
-// - Требуется env: BOT_TOKEN и BACKEND_URL (например: https://resale-helper-app.onrender.com)
-// =====================================================
-let tgBot = null;
-
-function hasPublicUrl() {
-  const u = String(BACKEND_URL || "").trim();
-  return /^https?:\/\//i.test(u);
-}
-
-function normalizeBaseUrl(u) {
-  return String(u || "").trim().replace(/\/+$/g, "");
-}
-
-function setupTelegramBotRoutes() {
-  if (!BOT_TOKEN) {
-    console.log("🤖 Telegram bot: BOT_TOKEN is empty -> bot disabled");
-    return;
-  }
-
-  tgBot = new Telegraf(BOT_TOKEN);
-
-  tgBot.start(async (ctx) => {
-    await ctx.reply(
-      `✅ ${BOT_BRAND} онлайн.
-
-` +
-      `Пиши статью/пункт (например: "12.8 УК") или вопрос словами — я отвечу и добавлю "Источник".
-` +
-      `Для входа в приложение: нажми "Telegram login" в MHELPER и используй код.`
-    );
-  });
-
-  tgBot.command("ping", (ctx) => ctx.reply("pong ✅"));
-
-  // simple text echo/help
-  tgBot.on("text", async (ctx) => {
-    const text = String(ctx.message?.text || "").trim();
-    if (!text) return;
-    if (/^ping$/i.test(text)) return ctx.reply("pong ✅");
-
-    // Для вопросов по правилам — отправляем в твой же API /api/ai/chat (если он поднят без Ollama — вернёт сниппеты)
-    try {
-      const base = normalizeBaseUrl(BACKEND_URL) || `http://127.0.0.1:${PORT}`;
-      const r = await fetch(`${base}/api/ai/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text })
-      });
-      const j = await r.json().catch(() => ({}));
-      const reply = String(j?.reply || "").trim();
-      if (reply) return ctx.reply(reply.slice(0, 3900)); // лимит TG ~4096
-      return ctx.reply("Не нашёл ответ. Попробуй переформулировать.");
-    } catch (e) {
-      return ctx.reply("Сервер AI сейчас недоступен. Попробуй позже.");
-    }
-  });
-
-  // webhook endpoint for Telegram updates
-  app.use(tgBot.webhookCallback(TG_WEBHOOK_PATH));
-
-  console.log(`🤖 Telegram bot route mounted: POST ${TG_WEBHOOK_PATH}`);
-}
-
-async function ensureWebhook() {
-  if (!tgBot) return;
-  if (!hasPublicUrl()) {
-    console.log("🤖 Telegram bot: BACKEND_URL/RENDER_EXTERNAL_URL is empty -> webhook not set");
-    return;
-  }
-  const base = normalizeBaseUrl(BACKEND_URL);
-  const fullUrl = `${base}${TG_WEBHOOK_PATH}`;
-  try {
-    // important: Telegram must reach your Render URL
-    await tgBot.telegram.setWebhook(fullUrl);
-    const info = await tgBot.telegram.getWebhookInfo();
-    console.log(`🤖 Telegram webhook set: ${fullUrl}`);
-    console.log(`🤖 Webhook info: url=${info?.url || "-"} pending=${info?.pending_update_count ?? "-"}`);
-  } catch (e) {
-    console.error("🤖 setWebhook error:", e?.message || e);
-  }
-}
-
-setupTelegramBotRoutes();
-
-
 app.listen(PORT, "0.0.0.0", () => {
-  // init TG webhook (Render)
-  ensureWebhook();
   console.log(`✅ Backend listening on port ${PORT}`);
-  console.log(`🤖 Ollama: ${OLLAMA_ENABLED ? OLLAMA_HOST : 'OFF'} | model: ${OLLAMA_ENABLED ? OLLAMA_MODEL : 'OFF'} | embed: ${OLLAMA_ENABLED ? OLLAMA_EMBED_MODEL : 'OFF'}`);
   console.log(`📚 rules dir: ${RULES_DIR} | indexed refs: ${REF_INDEX.size} | chunks: ${RULE_CHUNKS.length}`);
   console.log(`🧠 RAG store: ${RAG_STORE_PATH} | vectors: ${RAG?.chunks?.length || 0}`);
   console.log(`📄 rules file fallback: ${RULES_FILE}`);
