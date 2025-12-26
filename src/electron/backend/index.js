@@ -1823,8 +1823,12 @@ function setupTelegramBotRoutes() {
 
   tgBot.start(async (ctx) => {
     await ctx.reply(
-      `✅ ${BOT_BRAND} Bot online.\n\n` +
-      `Если ты тут по MHELPER: напиши вопрос (или "12.8 УК"), а в приложении пользуйся Telegram-login кодами как обычно.`
+      `✅ ${BOT_BRAND} онлайн.
+
+` +
+      `Пиши статью/пункт (например: "12.8 УК") или вопрос словами — я отвечу и добавлю "Источник".
+` +
+      `Для входа в приложение: нажми "Telegram login" в MHELPER и используй код.`
     );
   });
 
