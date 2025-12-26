@@ -23,26 +23,18 @@ import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
 
 /* ================== LOCAL API (FIX JSON BODY) ================== */
-// твой api() хелпер у тебя шлёт body как "[object Object]" => backend падает.
-// поэтому для SAVE используем прямой fetch с JSON.stringify.
 const RAW_API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:3001";
-/**
- * Some builds accidentally pass the whole .env line like:
- * "VITE_API_URL=https://example.com"
- * or with quotes/spaces. Normalize it here.
- */
+
 function normalizeBaseUrl(raw) {
   if (!raw) return "";
   let s = String(raw).trim().replace(/^["']|["']$/g, "");
-  // If someone accidentally stored "VITE_API_URL=https://..." as the value:
   if (/^VITE_API_URL\s*=/i.test(s)) s = s.replace(/^VITE_API_URL\s*=/i, "").trim();
-  // If another key got prefixed:
   if (/^[A-Z0-9_]+\s*=\s*https?:\/\//i.test(s)) s = s.replace(/^[A-Z0-9_]+\s*=\s*/i, "").trim();
-  // Remove trailing slash
   s = s.replace(/\/+$/, "");
   return s;
 }
 const API_URL = normalizeBaseUrl(RAW_API_URL) || "http://127.0.0.1:3001";
+
 function getTokenSafe() {
   try { return localStorage.getItem("auth_token"); } catch { return null; }
 }
@@ -66,12 +58,12 @@ async function apiJson(path, { method = "GET", body } = {}) {
   return data;
 }
 
-
 /* ================== ROLE META ================== */
 const ROLE_META = {
-  free:  { label: "FREE",  icon: UserIcon,    color: "text-slate-500 bg-slate-100 border-slate-200 dark:text-slate-400 dark:bg-white/5 dark:border-white/10" },  vip:   { label: "VIP",   icon: Star,        color: "text-amber-600 bg-amber-100 border-amber-200 dark:text-amber-400 dark:bg-amber-500/10 dark:border-amber-500/20" },
-  gold:  { label: "Gold",  icon: Crown,       color: "text-yellow-500 bg-yellow-500/10 border-yellow-500/20 dark:text-yellow-300 dark:bg-yellow-500/10 dark:border-yellow-500/20" },
-  admin: { label: "ADMIN", icon: Crown,       color: "text-rose-600 bg-rose-100 border-rose-200 dark:text-rose-400 dark:bg-rose-500/10 dark:border-rose-500/20" }
+  free:  { label: "FREE",  icon: UserIcon, color: "text-slate-500 bg-slate-100 border-slate-200 dark:text-slate-400 dark:bg-white/5 dark:border-white/10" },
+  vip:   { label: "VIP",   icon: Star,     color: "text-amber-600 bg-amber-100 border-amber-200 dark:text-amber-400 dark:bg-amber-500/10 dark:border-amber-500/20" },
+  gold:  { label: "Gold",  icon: Crown,    color: "text-yellow-500 bg-yellow-500/10 border-yellow-500/20 dark:text-yellow-300 dark:bg-yellow-500/10 dark:border-yellow-500/20" },
+  admin: { label: "ADMIN", icon: Crown,    color: "text-rose-600 bg-rose-100 border-rose-200 dark:text-rose-400 dark:bg-rose-500/10 dark:border-rose-500/20" }
 };
 
 /* ================== HELPERS ================== */
@@ -122,7 +114,7 @@ function calcMenuPos(btnEl, itemsLen, maxH = 320) {
   return { left: Math.round(r.left), top: Math.round(top), width: Math.round(r.width) };
 }
 
-/* ================== DROPDOWN (FILTERS, PORTAL, NO CLIP / NO FLICKER) ================== */
+/* ================== DROPDOWN ================== */
 function Dropdown({ value, items, onChange }) {
   const [open, setOpen] = useState(false);
 
@@ -130,7 +122,6 @@ function Dropdown({ value, items, onChange }) {
   const btnRef = useRef(null);
   const menuRef = useRef(null);
 
-  // null until we compute position -> avoids 0,0 flash
   const [pos, setPos] = useState(null);
 
   const close = () => {
@@ -167,7 +158,7 @@ function Dropdown({ value, items, onChange }) {
   }, [open, items.length]);
 
   const openNow = () => {
-    recalc(); // compute BEFORE showing portal
+    recalc();
     setOpen(true);
   };
 
@@ -182,11 +173,7 @@ function Dropdown({ value, items, onChange }) {
           width: pos.width,
           zIndex: 2147483647
         }}
-        className="
-          rounded-xl overflow-hidden shadow-2xl
-          border border-slate-200 dark:border-white/10
-          bg-white dark:bg-[#0f1117]
-        "
+        className="rounded-xl overflow-hidden shadow-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0f1117]"
         onPointerDown={(e) => e.stopPropagation()}
       >
         {items.map((it) => {
@@ -224,14 +211,7 @@ function Dropdown({ value, items, onChange }) {
         ref={btnRef}
         type="button"
         onClick={() => (open ? close() : openNow())}
-        className="
-          h-12 min-w-[150px] px-4 rounded-xl
-          border border-slate-200 dark:border-white/10
-          bg-white dark:bg-white/5
-          text-slate-900 dark:text-white
-          hover:bg-slate-100 dark:hover:bg-white/10
-          flex items-center justify-between
-        "
+        className="h-12 min-w-[150px] px-4 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white hover:bg-slate-100 dark:hover:bg-white/10 flex items-center justify-between"
       >
         <span className="text-sm">{value}</span>
         <ChevronDown className={`w-4 h-4 transition text-slate-500 dark:text-white/50 ${open ? "rotate-180" : ""}`} />
@@ -242,7 +222,6 @@ function Dropdown({ value, items, onChange }) {
   );
 }
 
-/* ================== DROPDOWN (MODAL, THEME AWARE, PORTAL, NO FLICKER) ================== */
 function ModalDropdown({ value, items, onChange }) {
   const [open, setOpen] = useState(false);
 
@@ -301,11 +280,7 @@ function ModalDropdown({ value, items, onChange }) {
           width: pos.width,
           zIndex: 2147483647
         }}
-        className="
-          rounded-xl overflow-hidden shadow-2xl
-          border border-slate-200 dark:border-white/10
-          bg-white dark:bg-[#0f1117]
-        "
+        className="rounded-xl overflow-hidden shadow-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0f1117]"
         onPointerDown={(e) => e.stopPropagation()}
       >
         {items.map((it) => {
@@ -343,19 +318,10 @@ function ModalDropdown({ value, items, onChange }) {
         ref={btnRef}
         type="button"
         onClick={() => (open ? close() : openNow())}
-        className="
-          w-full h-11 px-3 rounded-xl
-          border border-slate-200 dark:border-white/10
-          bg-white dark:bg-white/5
-          text-slate-900 dark:text-white
-          flex items-center justify-between
-          hover:bg-slate-100 dark:hover:bg-white/10
-        "
+        className="w-full h-11 px-3 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-900 dark:text-white flex items-center justify-between hover:bg-slate-100 dark:hover:bg-white/10"
       >
         <span className="text-sm">{value}</span>
-        <ChevronDown
-          className={`w-4 h-4 transition text-slate-500 dark:text-white/50 ${open ? "rotate-180" : ""}`}
-        />
+        <ChevronDown className={`w-4 h-4 transition text-slate-500 dark:text-white/50 ${open ? "rotate-180" : ""}`} />
       </button>
 
       {typeof document !== "undefined" ? createPortal(menu, document.body) : null}
@@ -408,17 +374,32 @@ function EditUserModal({ open, user, onClose, onSaved }) {
     try {
       const days = Math.max(0, Number(addDays || 0) || 0);
       const vipUntilIso = toISODateOrNull(vipDate);
+      const trimmedNote = (note || "").trim() || null;
 
+      // ✅ СУПЕР-СОВМЕСТИМОСТЬ С РАЗНЫМИ БЕКАМИ:
+      // - заметки могут называться note/memo/internal_note
+      // - дни могут называться vip_add_days/vip_days/add_days
+      // Отправим все варианты — бек возьмёт то, что знает.
       const body = {
         username: fullName,
         role: role.toLowerCase(),
         telegram_id: telegramId ? String(telegramId) : null,
+
+        // VIP days aliases
         vip_add_days: days,
+        vip_days: days,
+        add_days: days,
+
+        // VIP until aliases
         vip_until: vipUntilIso,
-        note: (note || "").trim() || null
+        vipUntil: vipUntilIso,
+
+        // Note aliases
+        note: trimmedNote,
+        memo: trimmedNote,
+        internal_note: trimmedNote
       };
 
-      // ✅ Save (always JSON.stringify to avoid "[object Object]" bug)
       await apiJson(`/admin/users/${user.id}`, { method: "PATCH", body });
 
       onSaved?.();
@@ -438,13 +419,7 @@ function EditUserModal({ open, user, onClose, onSaved }) {
       <div className="absolute inset-0 flex items-center justify-center p-4">
         <div
           ref={panelRef}
-          className="
-            w-full max-w-[560px]
-            rounded-2xl
-            border border-slate-200 dark:border-white/10
-            bg-white dark:bg-[#0f1117]
-            shadow-2xl overflow-hidden
-          "
+          className="w-full max-w-[560px] rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#0f1117] shadow-2xl overflow-hidden"
         >
           <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-white/10">
             <div className="text-lg font-semibold text-slate-900 dark:text-white">Edit User</div>
@@ -463,13 +438,7 @@ function EditUserModal({ open, user, onClose, onSaved }) {
               <Input
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
-                className="
-                  h-11
-                  bg-white dark:bg-white/5
-                  border border-slate-200 dark:border-white/10
-                  text-slate-900 dark:text-white
-                  placeholder:text-slate-400 dark:placeholder:text-white/30
-                "
+                className="h-11 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/30"
               />
             </div>
 
@@ -484,13 +453,7 @@ function EditUserModal({ open, user, onClose, onSaved }) {
                 value={telegramId}
                 onChange={(e) => setTelegramId(e.target.value)}
                 placeholder="Optional"
-                className="
-                  h-11
-                  bg-white dark:bg-white/5
-                  border border-slate-200 dark:border-white/10
-                  text-slate-900 dark:text-white
-                  placeholder:text-slate-400 dark:placeholder:text-white/30
-                "
+                className="h-11 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/30"
               />
             </div>
 
@@ -500,13 +463,7 @@ function EditUserModal({ open, user, onClose, onSaved }) {
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 placeholder="FamQ / GOLD / что угодно…"
-                className="
-                  h-11
-                  bg-white dark:bg-white/5
-                  border border-slate-200 dark:border-white/10
-                  text-slate-900 dark:text-white
-                  placeholder:text-slate-400 dark:placeholder:text-white/30
-                "
+                className="h-11 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/30"
               />
             </div>
 
@@ -523,12 +480,7 @@ function EditUserModal({ open, user, onClose, onSaved }) {
                 <Input
                   value={addDays}
                   onChange={(e) => setAddDays(e.target.value.replace(/[^\d]/g, ""))}
-                  className="
-                    h-11
-                    bg-white dark:bg-white/5
-                    border border-slate-200 dark:border-white/10
-                    text-slate-900 dark:text-white
-                  "
+                  className="h-11 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white"
                 />
               </div>
 
@@ -539,13 +491,7 @@ function EditUserModal({ open, user, onClose, onSaved }) {
                     value={vipDate}
                     onChange={(e) => setVipDate(e.target.value)}
                     placeholder="dd.mm.yyyy"
-                    className="
-                      h-11 pr-10
-                      bg-white dark:bg-white/5
-                      border border-slate-200 dark:border-white/10
-                      text-slate-900 dark:text-white
-                      placeholder:text-slate-400 dark:placeholder:text-white/30
-                    "
+                    className="h-11 pr-10 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/30"
                   />
                   <CalendarDays className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 dark:text-white/50 pointer-events-none" />
                 </div>
@@ -694,18 +640,6 @@ export default function AdminUsers() {
           <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.04] backdrop-blur-xl p-5 shadow-2xl shadow-black/10 dark:shadow-black/20">
             <div className="flex items-start justify-between">
               <div>
-                <div className="text-xs text-slate-500 dark:text-white/45">Staff</div>
-                <div className="mt-1 text-2xl font-extrabold text-blue-600 dark:text-blue-300">{stats.staff}</div>
-              </div>
-              <div className="w-10 h-10 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/5 flex items-center justify-center">
-                <Shield className="w-5 h-5 text-blue-500 dark:text-blue-400" />
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.04] backdrop-blur-xl p-5 shadow-2xl shadow-black/10 dark:shadow-black/20">
-            <div className="flex items-start justify-between">
-              <div>
                 <div className="text-xs text-slate-500 dark:text-white/45">Admins</div>
                 <div className="mt-1 text-2xl font-extrabold text-emerald-600 dark:text-emerald-300">{stats.admin}</div>
               </div>
@@ -725,13 +659,7 @@ export default function AdminUsers() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search by email, name, or Telegram ID..."
-                className="
-                  h-12 pl-12
-                  bg-white dark:bg-white/5
-                  border border-slate-200 dark:border-white/10
-                  text-slate-900 dark:text-white
-                  placeholder:text-slate-400 dark:placeholder:text-white/30
-                "
+                className="h-12 pl-12 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/30"
               />
               <div className="mt-2 text-xs text-slate-500 dark:text-white/40">
                 Showing {filtered.length} of {users.length} users
@@ -766,28 +694,13 @@ export default function AdminUsers() {
               <motion.div
                 key={u.id}
                 layout
-                className="
-                  relative
-                  w-full max-w-[520px]
-                  rounded-2xl border border-slate-200 dark:border-white/10
-                  bg-white dark:bg-white/[0.04] backdrop-blur-xl
-                  p-5 shadow-2xl shadow-black/10 dark:shadow-black/20
-                "
+                className="relative w-full max-w-[520px] rounded-2xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/[0.04] backdrop-blur-xl p-5 shadow-2xl shadow-black/10 dark:shadow-black/20"
               >
-                {/* ✏️ EDIT BUTTON */}
                 <button
                   type="button"
                   title="Edit user"
                   onClick={() => setEditUser(u)}
-                  className="
-                    absolute top-3 right-3
-                    w-9 h-9 rounded-lg
-                    border border-slate-200 dark:border-white/10
-                    bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10
-                    text-slate-600 dark:text-white/60 hover:text-slate-900 dark:hover:text-white
-                    flex items-center justify-center
-                    transition
-                  "
+                  className="absolute top-3 right-3 w-9 h-9 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-600 dark:text-white/60 hover:text-slate-900 dark:hover:text-white flex items-center justify-center transition"
                 >
                   <Pencil className="w-4 h-4" />
                 </button>
@@ -809,14 +722,12 @@ export default function AdminUsers() {
                         <span className="font-semibold truncate">{u.username || "User"}</span>
                         <Badge className={`text-[10px] ${Meta.color}`}>{Meta.label}</Badge>
                       </div>
-                      {/* email intentionally removed (as requested) */}
                     </div>
                   </div>
                 </div>
 
                 <div className="mt-3 text-xs text-slate-500 dark:text-white/40">TG: {u.telegram_id || "—"}</div>
 
-                {/* 📅 DATE (BOTTOM RIGHT) */}
                 <div className="absolute bottom-3 right-3 text-[11px] text-slate-400 dark:text-white/35 whitespace-nowrap">
                   {u.created_at ? new Date(u.created_at).toLocaleDateString() : "—"}
                 </div>
@@ -824,10 +735,8 @@ export default function AdminUsers() {
             );
           })}
         </div>
-
       </div>
 
-      {/* EDIT MODAL */}
       <EditUserModal
         open={!!editUser}
         user={editUser}

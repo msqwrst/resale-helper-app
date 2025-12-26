@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { fetchMe, getApiBase } from "@/lib/auth";
 import {
   Calculator as CalcIcon,
   Plus,
@@ -39,7 +40,7 @@ import ringtoneMp3 from "@/assets/facebook-messenger-ringtone.mp3";
 // ⚠️ В браузерной версии (Vite) нельзя использовать require().
 // Если у тебя есть fetchMe в проекте — импортируй его обычным import в этом файле.
 // Тут оставляем null, чтобы страница НЕ падала.
-const fetchMeSafe = null;
+const fetchMeSafe = fetchMe;
 
 // ====== LS keys ======
 const LS_KEY_ENTRIES = "resale_calc_entries_v3";
@@ -944,37 +945,55 @@ function RentalsPanel({
 
     startAlarm();
 
-    // ✅ TG notifications only if:
-    // - user enabled toggle
-    // - user is > FREE
-    // - backend exists
-    // - not already sent
-    if (tgEnabled && canPro) {
-      for (const r of due) {
-        if (!r.tgSent) {
-          sendTelegram?.({
-            type: "rental_end",
-            title: "Аренда закончилась",
-            message: `${r.name} — время аренды вышло`,
-            rentalId: r.id
-          });
-        }
-      }
-    }
-
+    // ✅ помечаем как сработало (TG отправляется отдельным циклом с ретраями)
     setRentals((prev) =>
       prev.map((r) =>
         r.notify && !r.fired && r.endAt <= now
           ? {
             ...r,
-            fired: true,
-            tgSent: tgEnabled && canPro ? true : r.tgSent
+            fired: true
           }
           : r
       )
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick]);
+
+  // ✅ TG retry loop: отправляем, пока tgSent === false (если запрос упал — повторим на следующем tick)
+  useEffect(() => {
+    if (!tgEnabled || !canPro) return;
+    if (!rentals?.length) return;
+
+    const now = Date.now();
+    const pending = rentals.filter(
+      (r) => r.notify && !r.tgSent && !r.deleted && r.endAt <= now
+    );
+    if (pending.length === 0) return;
+
+    (async () => {
+      for (const r of pending) {
+        try {
+          const ok = await sendTelegram?.({
+            type: "rental_end",
+            title: "Аренда закончилась",
+            message: `${r.name} — время аренды вышло`,
+            rentalId: r.id
+          });
+
+          // sendTelegram может ничего не возвращать; считаем успехом, если не вернуло false
+          if (ok !== false) {
+            setRentals((prev) =>
+              prev.map((x) => (x.id === r.id ? { ...x, tgSent: true } : x))
+            );
+          }
+        } catch {
+          // no-op: повторим позже
+        }
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick, tgEnabled, canPro, rentals]);
+
 
   const active = rentals.filter((r) => !r.deleted && r.endAt > Date.now());
   const ended = rentals.filter((r) => !r.deleted && r.endAt <= Date.now());
@@ -1238,6 +1257,7 @@ function RentalsPanel({
 
 // ====== Main ======
 export default function Calculator() {
+  const API_BASE = useMemo(() => (typeof getApiBase === "function" ? getApiBase() : ""), []);
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
   const [category, setCategory] = useState("items"); // ✅ NEW default: "вещи"
@@ -1273,6 +1293,7 @@ export default function Calculator() {
   // ✅ PRO gating
   const [me, setMe] = useState(null);
   const [tier, setTier] = useState("FREE"); // FREE | VIP | PRO | etc
+  const [tierLoaded, setTierLoaded] = useState(false);
   const canPro = tier !== "FREE";
 
   // ✅ Telegram enable toggle (must be explicit)
@@ -1322,9 +1343,7 @@ const selectChartTab = (next) => {
 };
 
 // ✅ Auto stats panel (under chart)
-const [autoPanelOpen, setAutoPanelOpen] = useState(false);
-
-  useEffect(() => localStorage.setItem(LS_KEY_TG_ENABLED, tgEnabled ? "1" : "0"), [tgEnabled]);
+useEffect(() => localStorage.setItem(LS_KEY_TG_ENABLED, tgEnabled ? "1" : "0"), [tgEnabled]);
   useEffect(() => localStorage.setItem(LS_KEY_CHART_TAB, chartTab), [chartTab]);
 
   const uploadEntryImage = (entryId, file) => {
@@ -1374,16 +1393,18 @@ const [autoPanelOpen, setAutoPanelOpen] = useState(false);
           const isPromo = isAdmin || role === "promo" || !!m?.promo_active || promoByDate;
           const t = isAdmin ? "ADMIN" : isVip ? "VIP" : isPromo ? "PROMO" : "FREE";
           setTier(t);
+          setTierLoaded(true);
+
 
           // ✅ load TG consent + rentals from backend (if token exists)
           try {
             const token2 = localStorage.getItem("auth_token");
             if (token2) {
               const [sRes, rRes] = await Promise.allSettled([
-                fetch("http://localhost:3001/settings/telegram", {
+                fetch(`${API_BASE}/settings/telegram`, {
                   headers: { Authorization: `Bearer ${token2}` }
                 }),
-                fetch("http://localhost:3001/rentals", {
+                fetch(`${API_BASE}/rentals`, {
                   headers: { Authorization: `Bearer ${token2}` }
                 })
               ]);
@@ -1418,7 +1439,7 @@ const [autoPanelOpen, setAutoPanelOpen] = useState(false);
 
         // fallback: try /me
         const token = localStorage.getItem("auth_token");
-        const res = await fetch("http://localhost:3001/me", {
+        const res = await fetch(`${API_BASE}/me`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {}
         });
         const data = await res.json().catch(() => ({}));
@@ -1451,16 +1472,17 @@ const [autoPanelOpen, setAutoPanelOpen] = useState(false);
 
         const t = isAdmin ? "ADMIN" : isGold ? "GOLD" : isVip ? "VIP" : isPromo ? "PROMO" : "FREE";
         setTier(t);
+        setTierLoaded(true);
 
         // ✅ load TG consent + rentals from backend (if token exists)
         try {
           const token2 = localStorage.getItem("auth_token");
           if (token2) {
             const [sRes, rRes] = await Promise.allSettled([
-              fetch("http://localhost:3001/settings/telegram", {
+              fetch(`${API_BASE}/settings/telegram`, {
                 headers: { Authorization: `Bearer ${token2}` }
               }),
-              fetch("http://localhost:3001/rentals", {
+              fetch(`${API_BASE}/rentals`, {
                 headers: { Authorization: `Bearer ${token2}` }
               })
             ]);
@@ -1524,7 +1546,7 @@ const [autoPanelOpen, setAutoPanelOpen] = useState(false);
   };
 
   const apiUpsertRental = async ({ id, name, rent, endAt }) => {
-    const data = await authedFetch("http://localhost:3001/rentals/upsert", {
+    const data = await authedFetch(`${API_BASE}/rentals/upsert`, {
       method: "POST",
       body: JSON.stringify({ id, name, rent, endAt })
     });
@@ -1532,7 +1554,7 @@ const [autoPanelOpen, setAutoPanelOpen] = useState(false);
   };
 
   const apiDeleteRental = async (id) => {
-    await authedFetch(`http://localhost:3001/rentals/${id}`, { method: "DELETE" });
+    await authedFetch(`${API_BASE}/rentals/${id}`, { method: "DELETE" });
     return true;
   };
 
@@ -1541,38 +1563,19 @@ const [autoPanelOpen, setAutoPanelOpen] = useState(false);
     setTgEnabled(next);
     localStorage.setItem(LS_KEY_TG_ENABLED, next ? "1" : "0");
     try {
-      await authedFetch("http://localhost:3001/settings/telegram", {
+      await authedFetch(`${API_BASE}/settings/telegram`, {
         method: "POST",
         body: JSON.stringify({ enabled: next })
       });
     } catch { }
   };
 
-  // ✅ auto-disable TG when access is removed (anti-cheat)
-  useEffect(() => {
-    if (canPro) return;
-    if (!tgEnabled) return;
-
-    // выключаем локально
-    setTgEnabled(false);
-    localStorage.setItem(LS_KEY_TG_ENABLED, "0");
-
-    // сообщаем бекенду (если токен есть)
-    (async () => {
-      try {
-        await authedFetch("http://localhost:3001/settings/telegram", {
-          method: "POST",
-          body: JSON.stringify({ enabled: false })
-        });
-      } catch { }
-    })();
-  }, [canPro]);
-
+  
   // ✅ Telegram sender: expects backend endpoint to route to your TG bot by userId from DB
   const sendTelegram = async ({ type, title, message, rentalId }) => {
     try {
       const token = localStorage.getItem("auth_token");
-      await fetch("http://localhost:3001/notify/telegram", {
+      const res = await fetch(`${API_BASE}/notify/telegram`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1580,7 +1583,10 @@ const [autoPanelOpen, setAutoPanelOpen] = useState(false);
         },
         body: JSON.stringify({ type, title, message, rentalId })
       });
-    } catch { }
+      return !!res?.ok;
+    } catch {
+      return false;
+    }
   };
 
   const handleSave = () => {
@@ -2282,26 +2288,8 @@ const [autoPanelOpen, setAutoPanelOpen] = useState(false);
         {/* ✅ Under-chart panel instead of side menu (ONLY for Auto tab) */}
         {chartTab === "auto" && (
           <div className="mt-3">
-            <button
-              type="button"
-              onClick={() => setAutoPanelOpen((s) => !s)}
-              className="px-3 py-2 rounded-xl border border-slate-200/70 dark:border-white/10 bg-white/10 text-sm text-slate-200 hover:bg-white/15"
-            >
-              {autoPanelOpen ? "Скрыть статистику" : "Показать статистику по транспорту"}
-            </button>
+            
 
-            <AnimatePresence initial={false}>
-              {autoPanelOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 10 }}
-                  transition={{ duration: 0.18 }}
-                >
-                  <AutoStatsUnderChart rentals={rentals} setRentals={setRentals} vehicleDir={vehicleDir} setVehicleDir={setVehicleDir} />
-                </motion.div>
-              )}
-            </AnimatePresence>
           </div>
         )}
     </motion.div>

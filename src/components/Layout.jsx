@@ -4,6 +4,8 @@ import HolidayLights from "@/components/HolidayLights";
 import React, { useEffect, useMemo, useState, useLayoutEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import UpdateOverlay from "@/components/UpdateOverlay";
+import UpdateToast from "@/components/UpdateToast";
 import {
   Menu,
   X,
@@ -60,9 +62,8 @@ function ToggleRow({ icon: Icon, title, subtitle, value, onToggle, rightLabel, d
     <button
       onClick={disabled ? undefined : onToggle}
       disabled={disabled}
-      className={`w-full flex items-center gap-3 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 transition select-none ${
-        disabled ? "opacity-60 cursor-not-allowed" : "hover:bg-slate-50 dark:hover:bg-slate-800"
-      }`}
+      className={`w-full flex items-center gap-3 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 transition select-none ${disabled ? "opacity-60 cursor-not-allowed" : "hover:bg-slate-50 dark:hover:bg-slate-800"
+        }`}
       type="button"
     >
       <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
@@ -146,11 +147,10 @@ function PillItem({ active, icon: Icon, label, to, onClick }) {
     <Link
       to={to}
       onClick={onClick}
-      className={`relative flex-1 min-w-0 flex items-center justify-center gap-2 px-3 py-3 rounded-2xl transition select-none ${
-        active
-          ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-500/12 dark:text-indigo-200"
-          : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900/60"
-      }`}
+      className={`relative flex-1 min-w-0 flex items-center justify-center gap-2 px-3 py-3 rounded-2xl transition select-none ${active
+        ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-500/12 dark:text-indigo-200"
+        : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-900/60"
+        }`}
       style={{ WebkitTapHighlightColor: "transparent" }}
     >
       <Icon className={`w-5 h-5 ${active ? "text-indigo-600 dark:text-indigo-200" : ""}`} />
@@ -229,22 +229,22 @@ export default function Layout({ children, currentPageName }) {
     };
   }, []);
 
-  
-// ✅ права (учёт role + vip_until + vip_active)
-const role = String(me?.role || "").toLowerCase();
-const isGold = role === "gold";
-const isAdmin = role === "admin";
-const isStaff = false;
-const vipUntil = parseVipUntil(me?.vip_until);
-const vipByDate = vipUntil ? vipUntil.getTime() > Date.now() : false;
 
-// VIP-права: vip / staff / admin / vip_active / vip_until
-const isVip = isAdmin || role === "vip" || isGold || !!me?.vip_active || vipByDate;
+  // ✅ права (учёт role + vip_until + vip_active)
+  const role = String(me?.role || "").toLowerCase();
+  const isGold = role === "gold";
+  const isAdmin = role === "admin";
+  const isStaff = false;
+  const vipUntil = parseVipUntil(me?.vip_until);
+  const vipByDate = vipUntil ? vipUntil.getTime() > Date.now() : false;
+
+  // VIP-права: vip / staff / admin / vip_active / vip_until
+  const isVip = isAdmin || role === "vip" || isGold || !!me?.vip_active || vipByDate;
 
   useEffect(() => {
-  applyThemeToDom(theme);
-  localStorage.setItem(LS_THEME, theme);
-}, [theme]);
+    applyThemeToDom(theme);
+    localStorage.setItem(LS_THEME, theme);
+  }, [theme]);
 
   useEffect(() => {
     localStorage.setItem(LS_EFFECTS, fxEnabled ? "1" : "0");
@@ -282,28 +282,28 @@ const isVip = isAdmin || role === "vip" || isGold || !!me?.vip_active || vipByDa
   }
 
 
-const menuItems = [
-  { name: "Home", icon: Home, page: "Home", to: "/home" },
-  { name: "BP", icon: Star, page: "BP", to: "/bp" },
-  { name: "Timer", icon: Timer, page: "Timer", to: "/timer" },
-  { name: "Calculator", icon: Calculator, page: "Calculator", to: "/calculator" },
-  { name: "VIP", icon: Crown, page: "VIP", to: "/vip" },
-  { name: "About", icon: Info, page: "About", to: "/about" },
+  const menuItems = [
+    { name: "Home", icon: Home, page: "Home", to: "/home" },
+    { name: "BP", icon: Star, page: "BP", to: "/bp" },
+    { name: "Timer", icon: Timer, page: "Timer", to: "/timer" },
+    { name: "Calculator", icon: Calculator, page: "Calculator", to: "/calculator" },
+    { name: "VIP", icon: Crown, page: "VIP", to: "/vip" },
+    { name: "About", icon: Info, page: "About", to: "/about" },
 
-  // ✅ Админ-панель доступна STAFF и ADMIN
-  ...(isAdmin
-    ? [
+    // ✅ Админ-панель доступна STAFF и ADMIN
+    ...(isAdmin
+      ? [
         { name: "Admin Keys", icon: Shield, page: "Admin", to: "/admin" },
         { name: "Admin Panel", icon: Users, page: "AdminUsers", to: "/admin/users" }
       ]
-    : [])
-];
+      : [])
+  ];
 
 
   // ✅ Если страницы передают currentPageName неправильно (например, "Admin" для всех админ-роутов),
   // то определяем активный пункт по URL, чтобы меню подсвечивалось корректно.
   const pathname = location?.pathname || "";
-    const isRouteActive = (to) => {
+  const isRouteActive = (to) => {
     if (!to) return false;
     if (to === "/") return pathname === "/" || pathname === "";
 
@@ -320,25 +320,27 @@ const menuItems = [
 
   const currentItem = routeCurrentItem || menuItems.find((item) => item.page === currentPageName);
 
-  
-  const CurrentIcon = currentItem?.icon || null;
-const statusKind = isAdmin ? "admin" : isGold ? "gold" : isVip ? "vip" : "free";
-const statusLabel = isAdmin ? "ADMIN" : isGold ? "GOLD" : isVip ? "VIP" : "FREE";
-  
-const STATUS_BADGE = {
-  admin: "bg-red-500 shadow-[0_0_18px_rgba(239,68,68,0.55)]",
-  gold: "bg-yellow-500 shadow-[0_0_18px_rgba(234,179,8,0.45)]",
-  vip: "bg-amber-500 shadow-[0_0_18px_rgba(245,158,11,0.40)]",
-  free: "bg-slate-400 shadow-[0_0_18px_rgba(148,163,184,0.35)]",
-};
 
-const statusBadgeClass = STATUS_BADGE[statusKind] || STATUS_BADGE.free;
+  const CurrentIcon = currentItem?.icon || null;
+  const statusKind = isAdmin ? "admin" : isGold ? "gold" : isVip ? "vip" : "free";
+  const statusLabel = isAdmin ? "ADMIN" : isGold ? "GOLD" : isVip ? "VIP" : "FREE";
+
+  const STATUS_BADGE = {
+    admin: "bg-red-500 shadow-[0_0_18px_rgba(239,68,68,0.55)]",
+    gold: "bg-yellow-500 shadow-[0_0_18px_rgba(234,179,8,0.45)]",
+    vip: "bg-amber-500 shadow-[0_0_18px_rgba(245,158,11,0.40)]",
+    free: "bg-slate-400 shadow-[0_0_18px_rgba(148,163,184,0.35)]",
+  };
+
+  const statusBadgeClass = STATUS_BADGE[statusKind] || STATUS_BADGE.free;
 
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors">
       <SeasonalEffects enabled={fxEnabled} />
       <HolidayLights enabled={fxEnabled} />
+      <UpdateOverlay />
+      <UpdateToast />
 
       <header className="fixed top-0 left-0 right-0 z-40 bg-white/80 dark:bg-slate-950/70 backdrop-blur-lg border-b border-slate-200 dark:border-slate-800 transition-colors">
         <div className="flex items-center justify-between px-4 h-16">
@@ -347,29 +349,29 @@ const statusBadgeClass = STATUS_BADGE[statusKind] || STATUS_BADGE.free;
           </Button>
 
           <h1 className="font-semibold flex items-center gap-2">
-  {CurrentIcon ? <CurrentIcon className="w-5 h-5" /> : null}
-  {headerTitle}
-</h1>
+            {CurrentIcon ? <CurrentIcon className="w-5 h-5" /> : null}
+            {headerTitle}
+          </h1>
 
-<div className="flex items-center gap-2">
-  <span
-    className="hidden sm:inline-flex items-center gap-2 text-[11px] font-bold px-2.5 py-1 rounded-full border border-slate-200 bg-white/70 text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200"
-    title="Активный статус"
-  >
-    <span className={`w-2 h-2 rounded-full ${statusBadgeClass}`} />
-    {statusLabel}
-  </span>
+          <div className="flex items-center gap-2">
+            <span
+              className="hidden sm:inline-flex items-center gap-2 text-[11px] font-bold px-2.5 py-1 rounded-full border border-slate-200 bg-white/70 text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200"
+              title="Активный статус"
+            >
+              <span className={`w-2 h-2 rounded-full ${statusBadgeClass}`} />
+              {statusLabel}
+            </span>
 
-  <Button
-    variant="ghost"
-    size="icon"
-    onClick={() => setSettingsOpen(true)}
-    className="hover:bg-slate-100 dark:hover:bg-slate-900"
-    title="Settings"
-  >
-    <Settings className="w-5 h-5 text-slate-700 dark:text-slate-200" />
-  </Button>
-</div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setSettingsOpen(true)}
+              className="hover:bg-slate-100 dark:hover:bg-slate-900"
+              title="Settings"
+            >
+              <Settings className="w-5 h-5 text-slate-700 dark:text-slate-200" />
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -496,11 +498,10 @@ const statusBadgeClass = STATUS_BADGE[statusKind] || STATUS_BADGE.free;
                       <Link
                         to={item.to}
                         onClick={() => setIsDrawerOpen(false)}
-                        className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
-                          isActive
-                            ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-200"
-                            : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-900"
-                        }`}
+                        className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${isActive
+                          ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-200"
+                          : "text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-900"
+                          }`}
                       >
                         <item.icon className={`w-5 h-5 ${isActive ? "text-indigo-600 dark:text-indigo-300" : "text-slate-400"}`} />
                         <span className="font-medium flex-1">{item.name}</span>
@@ -526,8 +527,9 @@ const statusBadgeClass = STATUS_BADGE[statusKind] || STATUS_BADGE.free;
               </Button>
 
               <p className="text-slate-500 dark:text-slate-400 text-center text-sm">
-                Version {__APP_VERSION__}
+                Version {typeof APP_VERSION !== "undefined" ? APP_VERSION : "—"}
               </p>
+
             </div>
           </motion.div>
         )}
@@ -539,13 +541,13 @@ const statusBadgeClass = STATUS_BADGE[statusKind] || STATUS_BADGE.free;
         <div className="mx-auto w-full max-w-2xl">
           <div className="rounded-[26px] border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-950/70 backdrop-blur-xl shadow-2xl shadow-slate-200/35 dark:shadow-black/35 p-2">
             <div className="flex items-center gap-2">
-              <PillItem active={isRouteActive("/home")} icon={Home} label="Home" to="/home" onClick={() => {}} />
-              <PillItem active={isRouteActive("/bp")} icon={Star} label="BP" to="/bp" onClick={() => {}} />
-              <PillItem active={isRouteActive("/timer")} icon={Timer} label="Timer" to="/timer" onClick={() => {}} />
-              <PillItem active={isRouteActive("/calculator")} icon={Calculator} label="Calc" to="/calculator" onClick={() => {}} />
-              <PillItem active={isRouteActive("/vip")} icon={Crown} label="VIP" to="/vip" onClick={() => {}} />
+              <PillItem active={isRouteActive("/home")} icon={Home} label="Home" to="/home" onClick={() => { }} />
+              <PillItem active={isRouteActive("/bp")} icon={Star} label="BP" to="/bp" onClick={() => { }} />
+              <PillItem active={isRouteActive("/timer")} icon={Timer} label="Timer" to="/timer" onClick={() => { }} />
+              <PillItem active={isRouteActive("/calculator")} icon={Calculator} label="Calc" to="/calculator" onClick={() => { }} />
+              <PillItem active={isRouteActive("/vip")} icon={Crown} label="VIP" to="/vip" onClick={() => { }} />
 
-              <PillItem active={isRouteActive("/about")} icon={Info} label="About" to="/about" onClick={() => {}} />
+              <PillItem active={isRouteActive("/about")} icon={Info} label="About" to="/about" onClick={() => { }} />
 
               <button
                 type="button"

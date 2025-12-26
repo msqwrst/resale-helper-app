@@ -2,6 +2,7 @@ import "dotenv/config";
 import path from "node:path";
 import fs from "node:fs";
 import express from "express";
+import { Telegraf } from "telegraf";
 import cors from "cors";
 import jwt from "jsonwebtoken";
 import { createClient } from "@supabase/supabase-js";
@@ -16,6 +17,10 @@ const PORT = Number(process.env.PORT || 3001);
 const JWT_SECRET = process.env.JWT_SECRET || "CHANGE_ME";
 const BOT_API_KEY = process.env.BOT_API_KEY || "";
 const TG_CODE_TTL_MIN = Number(process.env.TG_CODE_TTL_MIN || 5);
+const BOT_TOKEN = process.env.BOT_TOKEN || "";
+const BOT_BRAND = process.env.BOT_BRAND || "MHELPER";
+const BACKEND_URL = process.env.BACKEND_URL || process.env.RENDER_EXTERNAL_URL || "";
+const TG_WEBHOOK_PATH = process.env.TG_WEBHOOK_PATH || "/tg/webhook";
 
 
 const corsOptions = {
@@ -1791,7 +1796,94 @@ app.get("/api/rules/ref/:ref", (req, res) => {
 // =====================================================
 // 🚀 Start
 // =====================================================
+
+// =====================================================
+// 🤖 TELEGRAM BOT (Render-friendly webhook)
+// - On Render you must use WEBHOOK (not long-polling), иначе после выключения локальной консоли бот "умирает".
+// - Требуется env: BOT_TOKEN и BACKEND_URL (например: https://resale-helper-app.onrender.com)
+// =====================================================
+let tgBot = null;
+
+function hasPublicUrl() {
+  const u = String(BACKEND_URL || "").trim();
+  return /^https?:\/\//i.test(u);
+}
+
+function normalizeBaseUrl(u) {
+  return String(u || "").trim().replace(/\/+$/g, "");
+}
+
+function setupTelegramBotRoutes() {
+  if (!BOT_TOKEN) {
+    console.log("🤖 Telegram bot: BOT_TOKEN is empty -> bot disabled");
+    return;
+  }
+
+  tgBot = new Telegraf(BOT_TOKEN);
+
+  tgBot.start(async (ctx) => {
+    await ctx.reply(
+      `✅ ${BOT_BRAND} Bot online.\n\n` +
+      `Если ты тут по MHELPER: напиши вопрос (или "12.8 УК"), а в приложении пользуйся Telegram-login кодами как обычно.`
+    );
+  });
+
+  tgBot.command("ping", (ctx) => ctx.reply("pong ✅"));
+
+  // simple text echo/help
+  tgBot.on("text", async (ctx) => {
+    const text = String(ctx.message?.text || "").trim();
+    if (!text) return;
+    if (/^ping$/i.test(text)) return ctx.reply("pong ✅");
+
+    // Для вопросов по правилам — отправляем в твой же API /api/ai/chat (если он поднят без Ollama — вернёт сниппеты)
+    try {
+      const base = normalizeBaseUrl(BACKEND_URL) || `http://127.0.0.1:${PORT}`;
+      const r = await fetch(`${base}/api/ai/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text })
+      });
+      const j = await r.json().catch(() => ({}));
+      const reply = String(j?.reply || "").trim();
+      if (reply) return ctx.reply(reply.slice(0, 3900)); // лимит TG ~4096
+      return ctx.reply("Не нашёл ответ. Попробуй переформулировать.");
+    } catch (e) {
+      return ctx.reply("Сервер AI сейчас недоступен. Попробуй позже.");
+    }
+  });
+
+  // webhook endpoint for Telegram updates
+  app.use(tgBot.webhookCallback(TG_WEBHOOK_PATH));
+
+  console.log(`🤖 Telegram bot route mounted: POST ${TG_WEBHOOK_PATH}`);
+}
+
+async function ensureWebhook() {
+  if (!tgBot) return;
+  if (!hasPublicUrl()) {
+    console.log("🤖 Telegram bot: BACKEND_URL/RENDER_EXTERNAL_URL is empty -> webhook not set");
+    return;
+  }
+  const base = normalizeBaseUrl(BACKEND_URL);
+  const fullUrl = `${base}${TG_WEBHOOK_PATH}`;
+  try {
+    // important: Telegram must reach your Render URL
+    await tgBot.telegram.setWebhook(fullUrl);
+    const info = await tgBot.telegram.getWebhookInfo();
+    console.log(`🤖 Telegram webhook set: ${fullUrl}`);
+    console.log(`🤖 Webhook info: url=${info?.url || "-"} pending=${info?.pending_update_count ?? "-"}`);
+  } catch (e) {
+    console.error("🤖 setWebhook error:", e?.message || e);
+  }
+}
+
+setupTelegramBotRoutes();
+
+
 app.listen(PORT, "0.0.0.0", () => {
+  // init TG webhook (Render)
+  ensureWebhook();
   console.log(`✅ Backend listening on port ${PORT}`);
   console.log(`🤖 Ollama: ${OLLAMA_ENABLED ? OLLAMA_HOST : 'OFF'} | model: ${OLLAMA_ENABLED ? OLLAMA_MODEL : 'OFF'} | embed: ${OLLAMA_ENABLED ? OLLAMA_EMBED_MODEL : 'OFF'}`);
   console.log(`📚 rules dir: ${RULES_DIR} | indexed refs: ${REF_INDEX.size} | chunks: ${RULE_CHUNKS.length}`);

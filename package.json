@@ -1,7 +1,7 @@
 {
   "name": "mhelper",
   "private": true,
-  "version": "0.2.8",
+  "version": "0.2.7",
   "description": "MHELPER desktop app",
   "author": "mobsi",
   "type": "module",
