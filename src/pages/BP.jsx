@@ -7,6 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import SeasonalEffects from "@/components/SeasonalEffects";
 import HolidayLights from "@/components/HolidayLights";
+import { fetchMe } from "@/lib/auth";
 import {
   Search,
   RotateCcw,
@@ -49,22 +50,29 @@ import {
  */
 
 
-// ===== API (for VIP gating) =====
-const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:3001";
-function getToken() {
-  try { return localStorage.getItem("auth_token"); } catch { return null; }
+
+function normalizeRole(me) {
+  // Tries to be compatible with different /me payload shapes
+  if (!me) return "free";
+  const raw =
+    (me.role ??
+      me.user?.role ??
+      me.data?.role ??
+      me.account?.role ??
+      me.profile?.role ??
+      "").toString().trim().toLowerCase();
+
+  if (raw) return raw;
+
+  // fallback flags (if your API uses booleans)
+  if (me.is_owner || me.owner) return "owner";
+  if (me.is_admin || me.admin) return "admin";
+  if (me.is_gold || me.gold) return "gold";
+  if (me.is_vip || me.vip) return "vip";
+
+  return "free";
 }
-async function fetchMeSafe() {
-  const token = getToken();
-  if (!token) return null;
-  try {
-    const res = await fetch(`${API_URL}/me`, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  }
-}
+
 
 const LS_BP_STATE = "bp_state_v3";
 const LS_BP_HISTORY = "bp_history_v1";
@@ -259,13 +267,14 @@ export default function BP() {
 
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [me, setMe] = useState(null);
-  const canSeeAnalytics = !!(me && me.role && me.role !== "free");
+    const role = normalizeRole(me);
+  const canSeeAnalytics = role !== "free" || !!me?.vip_active;
 
 
   useEffect(() => {
     let alive = true;
     (async () => {
-      const m = await fetchMeSafe();
+      const m = await fetchMe();
       if (alive) setMe(m);
     })();
     return () => {
@@ -453,9 +462,6 @@ export default function BP() {
 
   return (
     <div className="pb-24 transition-colors">
-      <SeasonalEffects />
-      <HolidayLights />
-
       {/* Header */}
       <div className="relative z-10 px-6 pt-8 pb-4">
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="max-w-3xl mx-auto">

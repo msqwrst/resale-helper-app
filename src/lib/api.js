@@ -5,18 +5,55 @@ const DEV_FALLBACK = "http://127.0.0.1:3001";
 // В Vite доступно import.meta.env.DEV
 const API_URL_RAW = import.meta.env.VITE_API_URL;
 
-const API_URL = (() => {
-  // 1) Если задано через Render (VITE_API_URL) — используем
-  if (API_URL_RAW && String(API_URL_RAW).trim()) return String(API_URL_RAW).trim();
+function normalizeBaseUrl(raw) {
+  if (!raw) return "";
 
-  // 2) Если это dev (npm run dev / локально) — можно fallback на локалхост
+  let s = String(raw).trim();
+
+  // Частая ошибка: вставляют целиком "VITE_API_URL=https://..."
+  s = s.replace(/^VITE_API_URL\s*=\s*/i, "").trim();
+
+  // Иногда пишут с пробелами: "VITE API URL=https://..."
+  s = s.replace(/^VITE\s+API\s+URL\s*=\s*/i, "").trim();
+
+  // Убираем кавычки
+  s = s.replace(/^["']|["']$/g, "").trim();
+
+  // Если забыли протокол — добавим https://
+  if (!/^https?:\/\//i.test(s)) {
+    s = "https://" + s;
+  }
+
+  // Убираем хвостовые слэши
+  s = s.replace(/\/+$/, "");
+
+  return s;
+}
+
+function resolveApiBase() {
+  const normalized = normalizeBaseUrl(API_URL_RAW);
+
+  // 1) Если задано через env — используем
+  if (normalized) return normalized;
+
+  // 2) Если Electron/страница открыта как file:// — нельзя ходить по относительным путям (будет ERR_FILE_NOT_FOUND)
+  if (typeof window !== "undefined" && window.location?.protocol === "file:") {
+    return DEV_FALLBACK;
+  }
+
+  // 3) Если dev — fallback на локалхост
   if (import.meta.env.DEV) return DEV_FALLBACK;
 
-  // 3) В проде без env — это ошибка конфигурации (иначе кенты будут уходить в localhost)
-  throw new Error(
-    "VITE_API_URL is not set. Set it in Render Static Site → Environment (e.g. https://resale-helper-app.onrender.com)"
-  );
-})();
+  // 4) Прод без env: пробуем тот же домен (если у тебя прокси / api на том же хосте)
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin.replace(/\/+$/, "");
+  }
+
+  // 5) Последний шанс
+  return DEV_FALLBACK;
+}
+
+const API_URL = resolveApiBase();
 
 export function getToken() {
   return localStorage.getItem("auth_token");

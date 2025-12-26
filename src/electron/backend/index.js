@@ -68,9 +68,9 @@ function stripEdgePunct(s = "") {
     .trim();
 }
 
-function lc(s=""){ return String(s||"").toLowerCase(); }
+function lc(s = "") { return String(s || "").toLowerCase(); }
 
-function isVeryShort(s=""){
+function isVeryShort(s = "") {
   const t = stripEdgePunct(normalizeChatText(s));
   // emojis-only or 1-2 chars -> short
   if (!t) return true;
@@ -473,7 +473,7 @@ function memKey(req) {
     try {
       const payload = jwt.verify(token, JWT_SECRET);
       if (payload?.uid) return `uid:${payload.uid}`;
-    } catch {}
+    } catch { }
   }
   const sid = String(req.headers["x-session-id"] || "").trim();
   if (sid) return `sid:${sid}`;
@@ -688,6 +688,7 @@ function pickSnippetsForceLawFiles() {
 const OLLAMA_HOST = process.env.OLLAMA_HOST;
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL;
 
+const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL;
 const OLLAMA_ENABLED = (process.env.OLLAMA_ENABLED ?? "1") !== "0" && Boolean(OLLAMA_HOST && OLLAMA_MODEL);
 async function ollamaGenerate({ model, system, prompt }) {
   if (typeof OLLAMA_ENABLED !== "undefined" && !OLLAMA_ENABLED) throw new Error("OLLAMA_DISABLED");
@@ -1166,7 +1167,7 @@ app.get("/me", async (req, res) => {
 // Table expected: public.vip_keys
 // Columns used by UI: id, code, duration, max_uses, used_count, tag, created_at, expires_at, used, used_at, telegram_id(optional)
 // =====================================================
-function normalizeKeyCode(s="") {
+function normalizeKeyCode(s = "") {
   return String(s || "").trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "");
 }
 
@@ -1317,7 +1318,7 @@ app.post("/admin/keys", requireAdmin, async (req, res) => {
     }
 
     const payload = {
-  type: type,
+      type: type,
       code,
       duration,
       max_uses,
@@ -1368,7 +1369,7 @@ app.post("/admin/keys/create", requireAdmin, async (req, res) => {
     }
 
     const payload = {
-  type: type,
+      type: type,
       code,
       duration,
       max_uses,
@@ -1478,9 +1479,10 @@ async function requireAdminDb(req, res, next) {
     if (error) return res.status(500).json({ error: error.message });
     const role = String(user?.role || "").toLowerCase();
 
-    if (role !== "admin" && role !== "staff") {
+    if (role !== "admin") {
       return res.status(403).json({ error: "NO_ACCESS" });
     }
+
 
     // expose actual role to downstream handlers
     req.user = { ...(req.user || {}), role };
@@ -1489,6 +1491,158 @@ async function requireAdminDb(req, res, next) {
     return res.status(500).json({ error: "SERVER_ERROR" });
   }
 }
+
+// =====================================================
+// 🔒 Paid access helpers (anything ABOVE FREE)
+// =====================================================
+const PAID_ROLES = new Set(["vip", "gold", "gold_vip", "promo", "beta", "staff", "admin", "owner", "superadmin"]);
+
+function isPaidByRole(role) {
+  const r = String(role || "").toLowerCase();
+  return PAID_ROLES.has(r);
+}
+
+async function requirePaidDb(req, res, next) {
+  const uid = req._uid;
+  if (!uid) return res.status(401).json({ error: "BAD_TOKEN" });
+
+  try {
+    const { data: user, error } = await supabase
+      .from("users")
+      .select("id, role, vip_active, vip_until")
+      .eq("id", uid)
+      .maybeSingle();
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    const role = String(user?.role || "").toLowerCase();
+    const now = Date.now();
+    const untilMs = user?.vip_until ? new Date(user.vip_until).getTime() : 0;
+    const stillVip = Boolean(user?.vip_active) && Number.isFinite(untilMs) && untilMs > now;
+
+    const paid = isPaidByRole(role) || stillVip;
+    if (!paid) return res.status(403).json({ error: "ONLY_PAID" });
+
+    // expose actual role to downstream handlers
+    req.user = { ...(req.user || {}), role };
+    return next();
+  } catch (e) {
+    return res.status(500).json({ error: "SERVER_ERROR" });
+  }
+}
+
+// =====================================================
+// ⚙️ Telegram notifications setting
+// Frontend calls:
+//  - GET  /settings/telegram
+//  - POST /settings/telegram  { tg_notify_enabled: boolean }
+// FREE is not allowed.
+// =====================================================
+async function getTgEnabledForUser(uid) {
+  // 1) try users.tg_notify_enabled
+  const r1 = await supabase.from("users").select("tg_notify_enabled").eq("id", uid).maybeSingle();
+  if (!r1.error && r1.data && typeof r1.data.tg_notify_enabled === "boolean") {
+    return r1.data.tg_notify_enabled;
+  }
+  // 2) fallback to user_settings table (user_id, tg_notify_enabled)
+  const r2 = await supabase.from("user_settings").select("tg_notify_enabled").eq("user_id", uid).maybeSingle();
+  if (!r2.error && r2.data && typeof r2.data.tg_notify_enabled === "boolean") {
+    return r2.data.tg_notify_enabled;
+  }
+  return false;
+}
+
+async function setTgEnabledForUser(uid, enabled) {
+  // 1) try users.tg_notify_enabled
+  const u1 = await supabase.from("users").update({ tg_notify_enabled: enabled }).eq("id", uid);
+  if (!u1.error) return true;
+
+  // 2) fallback to user_settings upsert
+  const u2 = await supabase
+    .from("user_settings")
+    .upsert({ user_id: uid, tg_notify_enabled: enabled, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+  if (u2.error) throw u2.error;
+  return true;
+}
+
+app.get("/settings/telegram", requireUserAuth, requirePaidDb, async (req, res) => {
+  try {
+    const uid = req._uid;
+    const enabled = await getTgEnabledForUser(uid);
+    return res.json({ ok: true, tg_notify_enabled: Boolean(enabled) });
+  } catch (e) {
+    return res.status(500).json({ error: e?.message || "SERVER_ERROR" });
+  }
+});
+
+app.post("/settings/telegram", requireUserAuth, requirePaidDb, async (req, res) => {
+  try {
+    const uid = req._uid;
+    const enabled = Boolean(req.body?.tg_notify_enabled);
+    await setTgEnabledForUser(uid, enabled);
+    return res.json({ ok: true, tg_notify_enabled: enabled });
+  } catch (e) {
+    return res.status(500).json({ error: e?.message || "SERVER_ERROR" });
+  }
+});
+
+// =====================================================
+// 🚗 Rentals (needed by Calculator page)
+// Minimal CRUD, stored per-user in Supabase table `rentals`.
+// Schema suggestion:
+//   rentals: id uuid, user_id uuid, name text, rent numeric, start_at timestamptz, end_at timestamptz, created_at timestamptz
+// =====================================================
+app.get("/rentals", requireUserAuth, async (req, res) => {
+  try {
+    const uid = req._uid;
+    const { data, error } = await supabase
+      .from("rentals")
+      .select("*")
+      .eq("user_id", uid)
+      .order("created_at", { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ ok: true, rentals: data || [] });
+  } catch (e) {
+    return res.status(500).json({ error: e?.message || "SERVER_ERROR" });
+  }
+});
+
+app.post("/rentals/upsert", requireUserAuth, async (req, res) => {
+  try {
+    const uid = req._uid;
+    const body = req.body || {};
+    const payload = {
+      id: body.id || undefined,
+      user_id: uid,
+      name: String(body.name || "").trim() || null,
+      rent: typeof body.rent === "number" ? body.rent : Number(body.rent || 0),
+      start_at: body.start_at || body.startAt || null,
+      end_at: body.end_at || body.endAt || null,
+      updated_at: new Date().toISOString()
+    };
+    const { data, error } = await supabase
+      .from("rentals")
+      .upsert(payload, { onConflict: "id" })
+      .select("*")
+      .maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ ok: true, rental: data });
+  } catch (e) {
+    return res.status(500).json({ error: e?.message || "SERVER_ERROR" });
+  }
+});
+
+app.delete("/rentals/:id", requireUserAuth, async (req, res) => {
+  try {
+    const uid = req._uid;
+    const id = req.params.id;
+    const { error } = await supabase.from("rentals").delete().eq("id", id).eq("user_id", uid);
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ error: e?.message || "SERVER_ERROR" });
+  }
+});
 
 // ✅ GET users list for Admin Panel
 app.get("/admin/users", requireAdmin, requireAdminDb, async (_req, res) => {
@@ -1512,13 +1666,8 @@ app.patch("/admin/users/:id/role", requireAdmin, requireAdminDb, async (req, res
     const id = String(req.params.id || "");
     const role = String(req.body?.role || "").toLowerCase();
 
-    const allowed = ["free", "vip", "gold", "staff", "admin"];
+    const allowed = ["free", "vip", "gold", "admin"];
     if (!allowed.includes(role)) return res.status(400).json({ error: "BAD_ROLE" });
-
-    if (String(req.user?.role || "").toLowerCase() === "staff" && (role === "staff" || role === "admin")) {
-      return res.status(403).json({ error: "OWNER_ONLY" });
-    }
-
     const { error } = await supabase.from("users").update({ role }).eq("id", id);
     if (error) return res.status(500).json({ error: error.message });
 

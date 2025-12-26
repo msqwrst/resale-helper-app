@@ -234,12 +234,12 @@ export default function Layout({ children, currentPageName }) {
 const role = String(me?.role || "").toLowerCase();
 const isGold = role === "gold";
 const isAdmin = role === "admin";
-const isStaff = role === "staff" || isAdmin;
+const isStaff = false;
 const vipUntil = parseVipUntil(me?.vip_until);
 const vipByDate = vipUntil ? vipUntil.getTime() > Date.now() : false;
 
 // VIP-права: vip / staff / admin / vip_active / vip_until
-const isVip = isAdmin || isStaff || role === "vip" || isGold || !!me?.vip_active || vipByDate;
+const isVip = isAdmin || role === "vip" || isGold || !!me?.vip_active || vipByDate;
 
   useEffect(() => {
   applyThemeToDom(theme);
@@ -291,7 +291,7 @@ const menuItems = [
   { name: "About", icon: Info, page: "About", to: "/about" },
 
   // ✅ Админ-панель доступна STAFF и ADMIN
-  ...(isStaff
+  ...(isAdmin
     ? [
         { name: "Admin Keys", icon: Shield, page: "Admin", to: "/admin" },
         { name: "Admin Panel", icon: Users, page: "AdminUsers", to: "/admin/users" }
@@ -322,19 +322,18 @@ const menuItems = [
 
   
   const CurrentIcon = currentItem?.icon || null;
-const statusKind = isAdmin ? "admin" : isStaff ? "staff" : isGold ? "gold" : isVip ? "vip" : "free";
-  const statusLabel = isAdmin ? "ADMIN" : isStaff ? "STAFF" : isGold ? "GOLD" : isVip ? "VIP" : "FREE";
+const statusKind = isAdmin ? "admin" : isGold ? "gold" : isVip ? "vip" : "free";
+const statusLabel = isAdmin ? "ADMIN" : isGold ? "GOLD" : isVip ? "VIP" : "FREE";
   
-const statusDotClass =
-  statusKind === "admin"
-    ? "bg-red-500 shadow-[0_0_18px_rgba(239,68,68,0.55)]"
-    : statusKind === "staff"
-    ? "bg-indigo-400 shadow-[0_0_18px_rgba(99,102,241,0.45)]"
-    : statusKind === "gold"
-    ? "bg-yellow-400 shadow-[0_0_18px_rgba(250,204,21,0.55)]"
-    : statusKind === "vip"
-    ? "bg-fuchsia-500 shadow-[0_0_18px_rgba(217,70,239,0.55)]"
-    : "bg-slate-400 shadow-[0_0_14px_rgba(148,163,184,0.35)]";
+const STATUS_BADGE = {
+  admin: "bg-red-500 shadow-[0_0_18px_rgba(239,68,68,0.55)]",
+  gold: "bg-yellow-500 shadow-[0_0_18px_rgba(234,179,8,0.45)]",
+  vip: "bg-amber-500 shadow-[0_0_18px_rgba(245,158,11,0.40)]",
+  free: "bg-slate-400 shadow-[0_0_18px_rgba(148,163,184,0.35)]",
+};
+
+const statusBadgeClass = STATUS_BADGE[statusKind] || STATUS_BADGE.free;
+
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors">
@@ -357,7 +356,7 @@ const statusDotClass =
     className="hidden sm:inline-flex items-center gap-2 text-[11px] font-bold px-2.5 py-1 rounded-full border border-slate-200 bg-white/70 text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200"
     title="Активный статус"
   >
-    <span className={`w-2 h-2 rounded-full ${statusDotClass}`} />
+    <span className={`w-2 h-2 rounded-full ${statusBadgeClass}`} />
     {statusLabel}
   </span>
 
@@ -442,7 +441,7 @@ const statusDotClass =
                 <div className="text-xs text-slate-500 dark:text-slate-400">
                   Текущий статус:{" "}
                   <span className="font-semibold">
-                    {isAdmin ? "ADMIN" : isStaff ? "STAFF" : isGold ? "GOLD" : isVip ? "VIP" : "FREE"}
+                    {isAdmin ? "ADMIN" : isGold ? "GOLD" : isVip ? "VIP" : "FREE"}
                   </span>
                   {vipUntil ? (
                     <span className="ml-2 opacity-80">

@@ -44,7 +44,6 @@ function parseVipUntil(v) {
 
 function statusFromMe(me) {
   const role = String(me?.role || "").toLowerCase();
-  const isStaff = role === "staff";
   const isAdmin = role === "admin";
   const isGold = role === "gold";
   const vipUntil = parseVipUntil(me?.vip_until);

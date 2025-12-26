@@ -17,31 +17,12 @@ import {
 
 import messengerRingtone from "@/assets/facebook-messenger-ringtone.mp3";
 
+import { fetchMe } from "@/lib/auth";
+
 const LS_KEY = "resale_timer_state_v3";
 const LS_FORM_KEY = "resale_timer_form_v1";
 const MAX_TIMERS_FREE = 2;
 
-const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:3001";
-function getToken() {
-  try {
-    return localStorage.getItem("auth_token");
-  } catch {
-    return null;
-  }
-}
-async function fetchMeSafe() {
-  const token = getToken();
-  if (!token) return null;
-  try {
-    const res = await fetch(`${API_URL}/me`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    if (!res.ok) return null;
-    return await res.json();
-  } catch {
-    return null;
-  }
-}
 
 function parseDate(v) {
   if (!v) return null;
@@ -51,17 +32,22 @@ function parseDate(v) {
 function tierFromMe(me) {
   const role = String(me?.role || "").toLowerCase();
 
+  // роли из базы: free | vip | gold | staff | admin (и возможно promo)
   const isAdmin = role === "admin";
+  const isStaff = false;
+  const isGold = role === "gold";
 
   const vipUntil = parseDate(me?.vip_until);
   const vipByDate = vipUntil ? vipUntil.getTime() > Date.now() : false;
-  const isVip = isAdmin || role === "vip" || !!me?.vip_active || vipByDate;
+  const isVip = isAdmin || isGold || role === "vip" || !!me?.vip_active || vipByDate;
+
 
   const promoUntil = parseDate(me?.promo_until);
   const promoByDate = promoUntil ? promoUntil.getTime() > Date.now() : false;
-  const isPromo = isAdmin || role === "promo" || !!me?.promo_active || promoByDate;
+  const isPromo = isAdmin || isGold || role === "promo" || !!me?.promo_active || promoByDate;
 
   if (isAdmin) return "ADMIN";
+  if (isGold) return "GOLD";
   if (isVip) return "VIP";
   if (isPromo) return "PROMO";
   return "FREE";
@@ -146,7 +132,7 @@ export default function Timer() {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const m = await fetchMeSafe();
+      const m = await fetchMe();
       if (!alive) return;
       setMe(m);
       setTier(tierFromMe(m));
@@ -239,7 +225,7 @@ export default function Timer() {
     if (s <= 0) return;
 
     if (!isPrivileged && timers.length >= MAX_TIMERS_FREE) {
-      showLimit("FREE: максимум 2 таймера. VIP/PROMO/ADMIN — без лимита.");
+      showLimit("FREE: максимум 2 таймера. VIP/GOLD/ADMIN — без лимита.");
       return;
     }
 

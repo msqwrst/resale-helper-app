@@ -2,7 +2,7 @@
 // Token-based auth via backend Telegram-code verification
 
 const LS_TOKEN = "auth_token";
-const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:3001";
+const API_URL = "https://resale-helper-app.onrender.com".replace(/\/+$/, "");
 
 export function getToken() {
   try { return localStorage.getItem(LS_TOKEN); } catch { return null; }

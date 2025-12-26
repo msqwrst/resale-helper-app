@@ -1266,6 +1266,8 @@ export default function Calculator() {
     return saved && typeof saved === "object" ? saved : {};
   });
 
+  const [lightboxImg, setLightboxImg] = useState(null);
+
   const amountRef = useRef(null);
 
   // ✅ PRO gating
@@ -1423,16 +1425,31 @@ const [autoPanelOpen, setAutoPanelOpen] = useState(false);
         if (!mounted) return;
         setMe(data);
         const role = String(data?.role || data?.user?.role || "").toLowerCase();
-        const isAdmin = role === "admin" || role === "owner" || role === "superadmin";
+        const isAdmin =
+          role === "admin" || role === "owner" || role === "superadmin" || role === "staff";
+
         const vipUntilRaw = data?.vip_until || data?.vipUntil || data?.vip_till || null;
         const promoUntilRaw = data?.promo_until || data?.promoUntil || data?.promo_till || null;
+        const goldUntilRaw = data?.gold_until || data?.goldUntil || data?.gold_till || null;
+
         const vipUntil = vipUntilRaw ? new Date(vipUntilRaw) : null;
         const promoUntil = promoUntilRaw ? new Date(promoUntilRaw) : null;
-        const vipByDate = vipUntil && !Number.isNaN(vipUntil.getTime()) ? vipUntil.getTime() > Date.now() : false;
-        const promoByDate = promoUntil && !Number.isNaN(promoUntil.getTime()) ? promoUntil.getTime() > Date.now() : false;
-        const isVip = isAdmin || role === "vip" || !!data?.vip_active || vipByDate;
+        const goldUntil = goldUntilRaw ? new Date(goldUntilRaw) : null;
+
+        const vipByDate =
+          vipUntil && !Number.isNaN(vipUntil.getTime()) ? vipUntil.getTime() > Date.now() : false;
+        const promoByDate =
+          promoUntil && !Number.isNaN(promoUntil.getTime()) ? promoUntil.getTime() > Date.now() : false;
+        const goldByDate =
+          goldUntil && !Number.isNaN(goldUntil.getTime()) ? goldUntil.getTime() > Date.now() : false;
+
+        const isGold =
+          isAdmin || role === "gold" || role === "gold_vip" || !!data?.gold_active || goldByDate;
+
+        const isVip = isAdmin || isGold || role === "vip" || !!data?.vip_active || vipByDate;
         const isPromo = isAdmin || role === "promo" || !!data?.promo_active || promoByDate;
-        const t = isAdmin ? "ADMIN" : isVip ? "VIP" : isPromo ? "PROMO" : "FREE";
+
+        const t = isAdmin ? "ADMIN" : isGold ? "GOLD" : isVip ? "VIP" : isPromo ? "PROMO" : "FREE";
         setTier(t);
 
         // ✅ load TG consent + rentals from backend (if token exists)
@@ -1530,6 +1547,26 @@ const [autoPanelOpen, setAutoPanelOpen] = useState(false);
       });
     } catch { }
   };
+
+  // ✅ auto-disable TG when access is removed (anti-cheat)
+  useEffect(() => {
+    if (canPro) return;
+    if (!tgEnabled) return;
+
+    // выключаем локально
+    setTgEnabled(false);
+    localStorage.setItem(LS_KEY_TG_ENABLED, "0");
+
+    // сообщаем бекенду (если токен есть)
+    (async () => {
+      try {
+        await authedFetch("http://localhost:3001/settings/telegram", {
+          method: "POST",
+          body: JSON.stringify({ enabled: false })
+        });
+      } catch { }
+    })();
+  }, [canPro]);
 
   // ✅ Telegram sender: expects backend endpoint to route to your TG bot by userId from DB
   const sendTelegram = async ({ type, title, message, rentalId }) => {
@@ -2003,6 +2040,22 @@ const [autoPanelOpen, setAutoPanelOpen] = useState(false);
                           <div className="flex items-start justify-between gap-4">
                             <div className="min-w-0 flex-1">
                               <div className="flex flex-wrap items-center gap-2">
+                                {hasImg && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setLightboxImg(entryImages?.[e.id] || null)}
+                                    className="mt-3 block"
+                                    title="Открыть фото"
+                                  >
+                                    <img
+                                      src={entryImages?.[e.id]}
+                                      alt="Фото"
+                                      className="h-28 w-28 object-cover rounded-2xl border border-slate-200/70 dark:border-white/10 shadow-sm"
+                                      loading="lazy"
+                                    />
+                                  </button>
+                                )}
+
                                 {!isEditing ? (
                                   <div className={`text-lg font-bold ${amt >= 0 ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300"}`}>
                                     {amt >= 0 ? "+" : "-"}

@@ -25,13 +25,30 @@ import { api } from "@/lib/api";
 /* ================== LOCAL API (FIX JSON BODY) ================== */
 // твой api() хелпер у тебя шлёт body как "[object Object]" => backend падает.
 // поэтому для SAVE используем прямой fetch с JSON.stringify.
-const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:3001";
+const RAW_API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:3001";
+/**
+ * Some builds accidentally pass the whole .env line like:
+ * "VITE_API_URL=https://example.com"
+ * or with quotes/spaces. Normalize it here.
+ */
+function normalizeBaseUrl(raw) {
+  if (!raw) return "";
+  let s = String(raw).trim().replace(/^["']|["']$/g, "");
+  // If someone accidentally stored "VITE_API_URL=https://..." as the value:
+  if (/^VITE_API_URL\s*=/i.test(s)) s = s.replace(/^VITE_API_URL\s*=/i, "").trim();
+  // If another key got prefixed:
+  if (/^[A-Z0-9_]+\s*=\s*https?:\/\//i.test(s)) s = s.replace(/^[A-Z0-9_]+\s*=\s*/i, "").trim();
+  // Remove trailing slash
+  s = s.replace(/\/+$/, "");
+  return s;
+}
+const API_URL = normalizeBaseUrl(RAW_API_URL) || "http://127.0.0.1:3001";
 function getTokenSafe() {
   try { return localStorage.getItem("auth_token"); } catch { return null; }
 }
 async function apiJson(path, { method = "GET", body } = {}) {
   const token = getTokenSafe();
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetch(`${API_URL}${path.startsWith("/") ? path : `/${path}`}`, {
     method,
     headers: {
       "Content-Type": "application/json",
@@ -54,7 +71,6 @@ async function apiJson(path, { method = "GET", body } = {}) {
 const ROLE_META = {
   free:  { label: "FREE",  icon: UserIcon,    color: "text-slate-500 bg-slate-100 border-slate-200 dark:text-slate-400 dark:bg-white/5 dark:border-white/10" },  vip:   { label: "VIP",   icon: Star,        color: "text-amber-600 bg-amber-100 border-amber-200 dark:text-amber-400 dark:bg-amber-500/10 dark:border-amber-500/20" },
   gold:  { label: "Gold",  icon: Crown,       color: "text-yellow-500 bg-yellow-500/10 border-yellow-500/20 dark:text-yellow-300 dark:bg-yellow-500/10 dark:border-yellow-500/20" },
-  staff: { label: "STAFF", icon: Shield,      color: "text-purple-600 bg-purple-100 border-purple-200 dark:text-purple-400 dark:bg-purple-500/10 dark:border-purple-500/20" },
   admin: { label: "ADMIN", icon: Crown,       color: "text-rose-600 bg-rose-100 border-rose-200 dark:text-rose-400 dark:bg-rose-500/10 dark:border-rose-500/20" }
 };
 
@@ -348,10 +364,10 @@ function ModalDropdown({ value, items, onChange }) {
 }
 
 /* ================== OPTIONS ================== */
-const ROLE_ITEMS = ["All Roles", "Free", "VIP", "Gold", "Staff", "Admin"];
+const ROLE_ITEMS = ["All Roles", "Free", "VIP", "Gold", "Admin"];
 const VIP_ITEMS = ["All VIP", "Active VIP", "Expired", "No VIP"];
 const SORT_ITEMS = ["Newest First", "Oldest First", "Email A-Z", "Name A-Z"];
-const EDIT_ROLE_ITEMS = ["Free", "VIP", "Gold", "Staff", "Admin"];
+const EDIT_ROLE_ITEMS = ["Free", "VIP", "Gold", "Admin"];
 
 /* ================== EDIT MODAL ================== */
 function EditUserModal({ open, user, onClose, onSaved }) {
@@ -592,7 +608,7 @@ export default function AdminUsers() {
 
   const stats = useMemo(() => {
     const total = users.length;
-    const byRole = { free: 0, vip: 0, gold: 0, staff: 0, admin: 0 };
+    const byRole = { free: 0, vip: 0, gold: 0, admin: 0 };
     for (const u of users) {
       const r = (u.role || "free").toLowerCase();
       if (byRole[r] != null) byRole[r] += 1;

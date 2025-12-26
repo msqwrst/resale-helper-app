@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { loginByCode } from "@/lib/auth";
 /**
  * ULTRA PREMIUM REGISTRATION/LOGIN UI
  * - Эффект Glassmorphism (матовое стекло)
@@ -8,23 +9,7 @@ import React, { useMemo, useState } from "react";
 
 const TG_URL = import.meta.env.VITE_TELEGRAM_BOT_URL;
 
-const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:3001";
 
-async function loginByCodeDirect(code, note) {
-  const res = await fetch(`${API_URL}/auth/tg/verify`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code, note: note || undefined })
-  });
-  const txt = await res.text();
-  let data = null;
-  try { data = txt ? JSON.parse(txt) : null; } catch { data = { error: txt || "BAD_RESPONSE" }; }
-  if (!res.ok || !data?.token) {
-    throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
-  }
-  try { localStorage.setItem("auth_token", data.token); } catch {}
-  return data;
-}
 
 function normalizeCode(raw) {
   const cleaned = (raw || "").toUpperCase().replace(/[^\dA-Z_-]/g, "").slice(0, 32);
@@ -54,8 +39,8 @@ export default function Login() {
 
     setLoading(true);
     try {
-      await loginByCodeDirect(value, note.trim());
-location.href = "/home";
+      await loginByCode(value);
+window.location.hash = "#/home";
     } catch (e) {
       setErr(e?.message || "Ошибка входа. Проверьте код.");
     } finally {
@@ -63,7 +48,10 @@ location.href = "/home";
     }
   }
 
-  const openTelegram = () => window.open(TG_URL, "_blank", "noopener,noreferrer");
+  const openTelegram = () => {
+    if (!TG_URL) { setErr("Не задан VITE_TELEGRAM_BOT_URL (ссылка на бота)."); return; }
+    window.open(TG_URL, "_blank", "noopener,noreferrer");
+  };
 
   return (
     <div className="min-h-screen relative overflow-hidden bg-[#030407] text-slate-100 selection:bg-indigo-500/30">

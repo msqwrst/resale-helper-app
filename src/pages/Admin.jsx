@@ -323,7 +323,7 @@ export default function Admin() {
         if (!mounted) return;
         const role = String(me?.role || me?.user?.role || "").toLowerCase();
         setMyRole(role || "unknown");
-        const ok = ["admin", "owner", "superadmin", "staff"].includes(role);
+        const ok = ["admin", "owner", "superadmin"].includes(role);
         setRoleDenied(!ok);
       } catch {
         if (!mounted) return;
@@ -752,7 +752,7 @@ export default function Admin() {
             </h1>
             <Badge className="rounded-full bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 text-white shadow-[0_14px_40px_rgba(99,102,241,0.25)] hover:brightness-110 border-0">
               <span className="inline-flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5" /> {myRole === "staff" ? "STAFF" : "ADMIN"}
+                <Sparkles className="w-3.5 h-3.5" /> {"ADMIN"}
               </span>
             </Badge>
           </div>

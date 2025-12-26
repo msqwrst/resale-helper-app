@@ -25,7 +25,7 @@ export default function AdminKeys() {
         if (!mounted) return;
         const role = String(me?.role || me?.user?.role || "").toLowerCase();
         setMyRole(role || "unknown");
-        const ok = ["admin", "owner", "superadmin", "staff"].includes(role);
+        const ok = ["admin", "owner", "superadmin"].includes(role);
         setRoleDenied(!ok);
       } catch {
         if (!mounted) return;

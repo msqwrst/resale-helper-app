@@ -29,14 +29,13 @@ function parseDate(v) {
 
 function statusFromMe(me) {
   const role = String(me?.role || "").toLowerCase();
-  const isStaff = role === "staff";
   const isAdmin = role === "admin";
 
   const vipUntil = parseDate(me?.vip_until);
   const vipByDate = vipUntil ? vipUntil.getTime() > Date.now() : false;
 
   const isVip = isAdmin || role === "vip" || !!me?.vip_active || vipByDate;
-  return { role, isAdmin, isStaff, isVip, vipUntil };
+  return { role, isAdmin, isVip, vipUntil };
 }
 
 async function callAssistant({ messages }) {
@@ -206,7 +205,7 @@ export default function VIP() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { role, isAdmin, isStaff, isVip, vipUntil } = useMemo(() => statusFromMe(me), [me]);
+  const { role, isAdmin, isVip, vipUntil } = useMemo(() => statusFromMe(me), [me]);
 
   const isGold = role === "gold";
 
@@ -224,8 +223,8 @@ export default function VIP() {
     if (chatOpen) setTimeout(() => inputRef.current?.focus?.(), 220);
   }, [chatOpen]);
 
-  const statusKind = isAdmin ? "admin" : isStaff ? "staff" : isGold ? "gold" : isVip ? "vip" : "free";
-  const statusLabel = isAdmin ? "ADMIN" : isStaff ? "STAFF" : isGold ? "GOLD" : isVip ? "VIP" : "FREE";
+  const statusKind = isAdmin ? "admin" : isGold ? "gold" : isVip ? "vip" : "free";
+  const statusLabel = isAdmin ? "ADMIN" : isGold ? "GOLD" : isVip ? "VIP" : "FREE";
   const expiryLine = isAdmin ? null : isVip && vipUntil ? `до ${vipUntil.toLocaleString()}` : null;
 
   const StatusPill = () => {
@@ -555,16 +554,16 @@ export default function VIP() {
                 initial={{ y: 18, scale: 0.98, opacity: 0 }}
                 animate={{ y: 0, scale: 1, opacity: 1 }}
                 exit={{ y: 10, scale: 0.98, opacity: 0 }}
-                className="relative w-full max-w-lg rounded-3xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/8 backdrop-blur-xl p-6 shadow-[0_22px_80px_rgba(0,0,0,0.55)] ring-1 ring-white/10"
+                className="relative w-full max-w-lg rounded-3xl border border-white/10 bg-slate-950/70 backdrop-blur-xl p-6 shadow-[0_22px_80px_rgba(0,0,0,0.65)] ring-1 ring-white/10"
               >
                 <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-white dark:bg-white/10 border border-slate-200 dark:border-white/15 flex items-center justify-center">
-                    <Lock className="w-6 h-6 text-slate-900 dark:text-white" />
+                  <div className="w-12 h-12 rounded-2xl bg-white/10 border border-white/15 flex items-center justify-center">
+                    <Lock className="w-6 h-6 text-white" />
                   </div>
 
                   <div className="min-w-0">
-                    <div className="text-xl font-extrabold text-slate-900 dark:text-white">Только VIP</div>
-                    <div className="mt-1 text-sm text-slate-900 dark:text-white/75">
+                    <div className="text-xl font-extrabold text-white">Только VIP</div>
+                    <div className="mt-1 text-sm text-white/75">
                       Этот раздел доступен только VIP-пользователям. У тебя сейчас:{" "}
                       <span className="font-semibold">{role ? role.toUpperCase() : "FREE"}</span>
                     </div>
@@ -576,7 +575,7 @@ export default function VIP() {
 
                       <Button
                         variant="outline"
-                        className="rounded-2xl border-white/20 text-slate-900 dark:text-white hover:bg-white dark:bg-white/10"
+                        className="rounded-2xl border-white/20 text-white hover:bg-white/10"
                         onClick={() => load()}
                         type="button"
                       >

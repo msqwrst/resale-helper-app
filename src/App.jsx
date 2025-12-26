@@ -66,7 +66,7 @@ function RequireAdmin({ children }) {
       try {
         const me = await fetchMe();
         const role = String(me?.role || "").toLowerCase();
-        const allowed = role === "admin" || role === "staff";
+        const allowed = role === "admin";
         if (!alive) return;
         setOk(allowed);
       } catch {
