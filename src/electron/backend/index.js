@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { mountTelegramWebhookBot } from "./telegram_webhook_bot.js";
 import path from "node:path";
 import fs from "node:fs";
 import express from "express";
@@ -30,29 +31,11 @@ app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 app.use(express.json({ limit: "8mb" }));
 
-
-
 // ===============================
-// 🤖 Telegram bot (webhook only, Render) — OPTIONAL
-// - Avoids deploy crash if telegram_webhook_bot.js is missing
-// - Enable by setting TG_WEBHOOK_ENABLED=1 on Render
+// 🤖 Telegram bot (webhook only, Render)
 // ===============================
-let TG = null;
-if (process.env.TG_WEBHOOK_ENABLED === "1") {
-  try {
-    const mod = await import("./telegram_webhook_bot.js");
-    if (typeof mod.mountTelegramWebhookBot !== "function") {
-      console.warn("⚠️ telegram_webhook_bot.js loaded, but mountTelegramWebhookBot is not a function");
-    } else {
-      TG = mod.mountTelegramWebhookBot(app, { webhookPath: "/tg/webhook", port: PORT });
-      console.log("🤖 Telegram bot route mounted: POST /tg/webhook");
-    }
-  } catch (e) {
-    console.warn("⚠️ Telegram webhook bot not loaded:", e?.message || e);
-  }
-} else {
-  console.log("ℹ️ Telegram webhook bot disabled (set TG_WEBHOOK_ENABLED=1 to enable)");
-}
+const TG = mountTelegramWebhookBot(app, { webhookPath: "/tg/webhook", port: PORT });
+console.log("🤖 Telegram bot route mounted: POST /tg/webhook");
 
 
 const supabase = createClient(
@@ -1610,6 +1593,66 @@ app.post("/settings/telegram", requireUserAuth, requirePaidDb, async (req, res) 
     return res.status(500).json({ error: e?.message || "SERVER_ERROR" });
   }
 });
+// =====================================================
+// 📩 Telegram notify endpoint (used by frontend to test / manual send)
+// Frontend calls: POST /notify/telegram { title?, message?, rentalId?, type? }
+// Requires user auth + paid, and tg_notify_enabled=true, and user.telegram_id set.
+// =====================================================
+app.post("/notify/telegram", requireUserAuth, requirePaidDb, async (req, res) => {
+  try {
+    // TG bot may be disabled in some deployments
+    const tgApi = TG?.bot?.telegram;
+    if (!tgApi || typeof tgApi.sendMessage !== "function") {
+      return res.status(503).json({ error: "TG_DISABLED" });
+    }
+
+    const uid = req._uid;
+
+    // check user consent toggle
+    const enabled = await getTgEnabledForUser(uid);
+    if (!enabled) return res.status(403).json({ error: "TG_NOT_ENABLED" });
+
+    // get telegram_id from DB
+    const { data: u, error: uErr } = await supabase
+      .from("users")
+      .select("telegram_id")
+      .eq("id", uid)
+      .maybeSingle();
+
+    if (uErr) return res.status(500).json({ error: uErr.message });
+    const tgId = u?.telegram_id ? String(u.telegram_id).trim() : "";
+    if (!tgId) return res.status(400).json({ error: "NO_TELEGRAM_ID" });
+
+    const title = String(req.body?.title || "").trim();
+    const message = String(req.body?.message || "").trim();
+    const type = String(req.body?.type || "").trim();
+    const rentalId = req.body?.rentalId != null ? String(req.body.rentalId) : null;
+
+    const lines = [];
+    if (title) lines.push(`🔔 ${title}`);
+    if (type && !title) lines.push(`🔔 ${type}`);
+    if (message) lines.push(message);
+    const text = lines.filter(Boolean).join("\n\n") || "🔔 Уведомление";
+
+    await tgApi.sendMessage(tgId, text);
+
+    // optional: mark rental as notified
+    if (rentalId) {
+      try {
+        await supabase
+          .from("rentals")
+          .update({ notified: true, fired: true, updated_at: new Date().toISOString() })
+          .eq("id", rentalId)
+          .eq("user_id", uid);
+      } catch {}
+    }
+
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ error: e?.message || "SERVER_ERROR" });
+  }
+});
+
 
 // =====================================================
 // 🚗 Rentals (needed by Calculator page)

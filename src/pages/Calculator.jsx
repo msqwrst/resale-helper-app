@@ -1565,7 +1565,7 @@ useEffect(() => localStorage.setItem(LS_KEY_TG_ENABLED, tgEnabled ? "1" : "0"), 
     try {
       await authedFetch(`${API_BASE}/settings/telegram`, {
         method: "POST",
-        body: JSON.stringify({ enabled: next })
+        body: JSON.stringify({ tg_notify_enabled: next })
       });
     } catch { }
   };
