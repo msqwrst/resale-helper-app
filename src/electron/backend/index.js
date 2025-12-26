@@ -1,8 +1,8 @@
 import "dotenv/config";
+import { mountTelegramWebhookBot } from "./telegram_webhook_bot.js";
 import path from "node:path";
 import fs from "node:fs";
 import express from "express";
-import { Telegraf } from "telegraf";
 import cors from "cors";
 import jwt from "jsonwebtoken";
 import { createClient } from "@supabase/supabase-js";
@@ -17,10 +17,6 @@ const PORT = Number(process.env.PORT || 3001);
 const JWT_SECRET = process.env.JWT_SECRET || "CHANGE_ME";
 const BOT_API_KEY = process.env.BOT_API_KEY || "";
 const TG_CODE_TTL_MIN = Number(process.env.TG_CODE_TTL_MIN || 5);
-const BOT_TOKEN = process.env.BOT_TOKEN || "";
-const BOT_BRAND = process.env.BOT_BRAND || "MHELPER";
-const BACKEND_URL = process.env.BACKEND_URL || process.env.RENDER_EXTERNAL_URL || "";
-const TG_WEBHOOK_PATH = process.env.TG_WEBHOOK_PATH || "/tg/webhook";
 
 
 const corsOptions = {
@@ -34,6 +30,13 @@ app.use(cors(corsOptions));
 // Express 5: "*" ломается
 app.options(/.*/, cors(corsOptions));
 app.use(express.json({ limit: "8mb" }));
+
+// ===============================
+// 🤖 Telegram bot (webhook only, Render)
+// ===============================
+const TG = mountTelegramWebhookBot(app, { webhookPath: "/tg/webhook", port: PORT });
+console.log("🤖 Telegram bot route mounted: POST /tg/webhook");
+
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -125,10 +128,6 @@ const ST = {
 
 function detectSmallTalkIntent(text) {
   const raw = normalizeChatText(text);
-  // Если это похоже на номер пункта/статьи (например 12.8 / 2/7 / 12.7.1*), то это НЕ smalltalk.
-  if (/^\d{1,3}(?:[.\-/]\d{1,3}(?:[.\-/]\d{1,3})?)?(\*{0,3})$/.test(stripEdgePunct(raw))) {
-    return null;
-  }
   const t = lc(stripEdgePunct(raw));
 
   // Very short and non-informational -> treat as smalltalk
@@ -692,12 +691,160 @@ function pickSnippetsForceLawFiles() {
 }
 
 // =====================================================
+// 🤖 AI: Local Ollama (HTTP)
 // =====================================================
-// 🤖 AI: Ollama REMOVED
-// - По просьбе: полностью отключаем Ollama.
-// - /api/ai/chat возвращает только найденные фрагменты из rules (без генерации).
+const OLLAMA_HOST = process.env.OLLAMA_HOST;
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL;
+
+const OLLAMA_EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL;
+const OLLAMA_ENABLED = (process.env.OLLAMA_ENABLED ?? "1") !== "0" && Boolean(OLLAMA_HOST && OLLAMA_MODEL);
+async function ollamaGenerate({ model, system, prompt }) {
+  if (typeof OLLAMA_ENABLED !== "undefined" && !OLLAMA_ENABLED) throw new Error("OLLAMA_DISABLED");
+  const r = await fetch(`${OLLAMA_HOST}/api/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model, system, prompt, stream: false })
+  });
+  const t = await r.text();
+  if (!r.ok) throw new Error(`Ollama /api/generate failed: ${r.status} ${t}`);
+  try { return JSON.parse(t); } catch { return { response: t }; }
+}
+
+async function ollamaEmbed(text) {
+  if (typeof OLLAMA_ENABLED !== "undefined" && !OLLAMA_ENABLED) throw new Error("OLLAMA_DISABLED");
+  const r = await fetch(`${OLLAMA_HOST}/api/embeddings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: OLLAMA_EMBED_MODEL, prompt: String(text || "") })
+  });
+  const t = await r.text();
+  if (!r.ok) throw new Error(`Ollama /api/embeddings failed: ${r.status} ${t}`);
+  const j = JSON.parse(t);
+  return j?.embedding || [];
+}
+
+// Safer intent filter: block only harmful "how to"
+const AI_BLOCK_INTENT = [
+  /(?:как|how)\s+(?:взломать|hack|ddos|dox|докс|обойти|bypass|обойти\s+закон|evade)/i,
+  /(?:как|how)\s+(?:сделать|make|изготовить)\s+(?:бомб|взрыв|explos)/i,
+  /(?:как|how)\s+(?:купить|достать|get)\s+(?:наркот|drug|оружи|gun|патрон|ammo)\b/i
+];
+function aiIsBlocked(text) {
+  const t = String(text || "");
+  return AI_BLOCK_INTENT.some((re) => re.test(t));
+}
+
 // =====================================================
-const OLLAMA_ENABLED = false;
+// 🧠 RAG store (embeddings) — OPTIONAL but recommended
+// =====================================================
+let RAG = { meta: { created_at: null, model: (typeof OLLAMA_EMBED_MODEL === "string" ? OLLAMA_EMBED_MODEL : null), count: 0 }, chunks: [] };
+
+function ragLoad() {
+  try {
+    if (fs.existsSync(RAG_STORE_PATH)) {
+      const raw = fs.readFileSync(RAG_STORE_PATH, "utf8");
+      const j = JSON.parse(raw);
+      if (j?.chunks?.length) RAG = j;
+    }
+  } catch (e) {
+    console.error("RAG load error:", e?.message || e);
+  }
+}
+function ragSave() {
+  fs.writeFileSync(RAG_STORE_PATH, JSON.stringify(RAG, null, 2), "utf8");
+}
+ragLoad();
+
+function cosine(a, b) {
+  let dot = 0, na = 0, nb = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    const x = a[i] || 0;
+    const y = b[i] || 0;
+    dot += x * y;
+    na += x * x;
+    nb += y * y;
+  }
+  if (!na || !nb) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+function buildContextFromTop(top) {
+  return top.map((x) => {
+    const codeLabel = x.code === "UK" ? "УК" : x.code === "AK" ? "АК" : "—";
+    return `\n\n--- REF: ${x.ref}${x.stars || ""} [${codeLabel}] FILE: ${x.file} TITLE: ${x.title} ---\n${x.text}`;
+  }).join("").trim();
+}
+
+// =====================================================
+// AI endpoints: health / reload / reindex / chat
+// =====================================================
+app.get("/api/ai/health", (_req, res) =>
+  res.json({
+    ok: true,
+    ollama: OLLAMA_HOST,
+    model: (typeof OLLAMA_MODEL === "string" ? OLLAMA_MODEL : null),
+    embed_model: (typeof OLLAMA_EMBED_MODEL === "string" ? OLLAMA_EMBED_MODEL : null),
+    rulesDir: RULES_DIR,
+    rulesFile: RULES_FILE,
+    indexedRefs: REF_INDEX.size,
+    rag: {
+      store: RAG_STORE_PATH,
+      count: RAG?.chunks?.length || 0,
+      created_at: RAG?.meta?.created_at || null,
+      model: RAG?.meta?.model || null
+    }
+  })
+);
+
+app.post("/api/ai/reload_rules", (_req, res) => {
+  reloadRules();
+  res.json({ ok: true, refs: REF_INDEX.size, chunks: RULE_CHUNKS.length });
+});
+
+app.post("/api/ai/reindex", async (_req, res) => {
+  try {
+    if (!OLLAMA_ENABLED) {
+      return res.status(400).json({ error: "OLLAMA_DISABLED", message: "Ollama отключена (OLLAMA_ENABLED=0 или нет OLLAMA_HOST/OLLAMA_MODEL)." });
+    }
+    reloadRules();
+    if (!RULE_CHUNKS.length) {
+      return res.status(400).json({ error: "NO_RULES", message: `No rules chunks found in ${RULES_DIR}` });
+    }
+
+    console.log(`🧠 Reindex start: chunks=${RULE_CHUNKS.length} embed_model=${OLLAMA_EMBED_MODEL}`);
+
+    const out = new Array(RULE_CHUNKS.length);
+    let next = 0;
+
+    async function worker() {
+      while (true) {
+        const i = next++;
+        if (i >= RULE_CHUNKS.length) return;
+        const c = RULE_CHUNKS[i];
+        const textForVec = `${c.title}\n${c.ref}${c.stars || ""}\n${c.text}`;
+        const vec = await ollamaEmbed(textForVec);
+        out[i] = { ...c, vec };
+        if ((i + 1) % 25 === 0) console.log(`🧠 Reindex progress: ${i + 1}/${RULE_CHUNKS.length}`);
+      }
+    }
+
+    // 2 workers = быстрее, но не убивает Ollama
+    await Promise.all([worker(), worker()]);
+
+    RAG = {
+      meta: { created_at: new Date().toISOString(), model: OLLAMA_EMBED_MODEL, count: out.length },
+      chunks: out
+    };
+    ragSave();
+
+    console.log(`🧠 Reindex done: vectors=${out.length} -> ${RAG_STORE_PATH}`);
+    res.json({ ok: true, count: out.length, store: RAG_STORE_PATH, created_at: RAG.meta.created_at });
+  } catch (e) {
+    console.error("REINDEX ERROR:", e);
+    res.status(500).json({ error: "REINDEX_FAILED", message: e?.message || String(e) });
+  }
+});
 
 app.post("/api/ai/chat", async (req, res) => {
   try {
@@ -797,14 +944,52 @@ app.post("/api/ai/chat", async (req, res) => {
         if (forced) context = forced;
       }
     }
-    // NOTE: Ollama удалена. Возвращаем только найденные фрагменты (с источником).
-    const snippetText = context ? context : "В памятке/правилах этого не найдено.";
-    const short = snippetText.length > 3500 ? snippetText.slice(0, 3500) + "…" : snippetText;
-    return res.json({ reply: short, model: null, ollama: "OFF" });
 
+    const system =
+      process.env.AI_SYSTEM_PROMPT ||
+      `Ты — помощник по памятке/правилам. Отвечай СТРОГО по тексту из контекста.
+ЖЁСТКИЕ ПРАВИЛА:
+- НЕ придумывай статьи/пункты/штрафы.
+- Если нет прямого ответа в контексте — скажи: "В памятке/правилах этого нет" и попроси уточнить.
+- Всегда добавляй "Источник:" и укажи REF/FILE (как в контексте).
+ФОРМАТ: 2-6 коротких предложений, без воды.`;
+
+    const prompt = `ВОПРОС: ${userText}
+
+КОНТЕКСТ:
+${context || "(контекст пуст — нет релевантных фрагментов)"}
+
+ОТВЕТ (со ссылкой на источник):`;
+
+    if (!OLLAMA_ENABLED) {
+      // Fallback: return top snippets directly (no generation)
+      const snippetText = context ? context : "В памятке/правилах этого не найдено.";
+      const short = snippetText.length > 2500 ? snippetText.slice(0, 2500) + "…" : snippetText;
+      return res.json({ reply: short, model: null, ollama: "OFF" });
+    }
+
+    const result = await ollamaGenerate({ model: (typeof OLLAMA_MODEL === "string" ? OLLAMA_MODEL : null), system, prompt });
+
+    const reply =
+      (result?.response || "").trim() ||
+      "Не нашёл этого в памятке/правилах. Уточни формулировку или добавь текст в rules/*.txt и сделай reindex.";
+
+    return res.json({ reply, model: (typeof OLLAMA_MODEL === "string" ? OLLAMA_MODEL : null) });
   } catch (e) {
     console.error("AI CHAT ERROR:", e);
     return res.status(500).json({ error: "AI_ERROR", message: e?.message || String(e) });
+  }
+});
+
+// Debug: check ollama + model list
+app.get("/api/ai/ollama", async (_req, res) => {
+  try {
+    const r = await fetch(`${OLLAMA_HOST}/api/tags`);
+    const t = await r.text();
+    if (!r.ok) return res.status(500).json({ error: "OLLAMA_TAGS_ERROR", message: t });
+    return res.type("application/json").send(t);
+  } catch (e) {
+    return res.status(500).json({ error: "OLLAMA_UNREACHABLE", message: e?.message || String(e) });
   }
 });
 
@@ -1614,149 +1799,18 @@ app.get("/api/rules/ref/:ref", (req, res) => {
 // =====================================================
 // 🚀 Start
 // =====================================================
-
-// =====================================================
-// 🤖 TELEGRAM BOT (Render-friendly webhook)
-// - On Render you must use WEBHOOK (not long-polling), иначе после выключения локальной консоли бот "умирает".
-// - Требуется env: BOT_TOKEN и BACKEND_URL (например: https://resale-helper-app.onrender.com)
-// =====================================================
-let tgBot = null;
-
-function hasPublicUrl() {
-  const u = String(BACKEND_URL || "").trim();
-  return /^https?:\/\//i.test(u);
-}
-
-function normalizeBaseUrl(u) {
-  return String(u || "").trim().replace(/\/+$/g, "");
-}
-
-function setupTelegramBotRoutes() {
-  if (!BOT_TOKEN) {
-    console.log("🤖 Telegram bot: BOT_TOKEN is empty -> bot disabled");
-    return;
-  }
-
-  tgBot = new Telegraf(BOT_TOKEN);
-
-  tgBot.start(async (ctx) => {
-    await ctx.reply(
-      `✅ ${BOT_BRAND} Bot online.\n\n` +
-      `Если ты тут по MHELPER: напиши вопрос (или "12.8 УК"), а в приложении пользуйся Telegram-login кодами как обычно.`
-    );
-  });
-
-  tgBot.command("ping", (ctx) => ctx.reply("pong ✅"));
-
-  tgBot.command("code", async (ctx) => {
-    try {
-      const tgId = String(ctx.from?.id || "").trim();
-      if (!tgId) return ctx.reply("Не вижу твой Telegram ID 😕");
-
-      // 1) reuse existing valid code (anti-spam)
-      const { data: existing, error: exErr } = await supabase
-        .from("tg_login_codes")
-        .select("*")
-        .eq("telegram_id", tgId)
-        .eq("used", false)
-        .gt("expires_at", new Date().toISOString())
-        .order("created_at", { ascending: false })
-        .limit(1);
-
-      if (exErr) return ctx.reply("Ошибка базы при получении кода.");
-
-      if (existing?.[0]?.code) {
-        return ctx.reply(`🔐 Код входа: ${existing[0].code}\n⏳ Действует до: ${existing[0].expires_at}`);
-      }
-
-      // 2) generate unique code
-      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-      const gen = (len = 6) => Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
-
-      let code = gen(6);
-      for (let i = 0; i < 6; i++) {
-        const { data: clash, error: cErr } = await supabase
-          .from("tg_login_codes")
-          .select("id")
-          .eq("code", code)
-          .limit(1);
-        if (cErr) return ctx.reply("Ошибка базы при создании кода.");
-        if (!clash?.length) break;
-        code = gen(6);
-      }
-
-      const expiresAt = new Date(Date.now() + TG_CODE_TTL_MIN * 60 * 1000).toISOString();
-
-      const { data: ins, error: insErr } = await supabase
-        .from("tg_login_codes")
-        .insert({ telegram_id: tgId, code: code.toUpperCase(), expires_at: expiresAt, used: false })
-        .select()
-        .single();
-
-      if (insErr) return ctx.reply("Ошибка базы при сохранении кода.");
-
-      return ctx.reply(`🔐 Код входа: ${ins.code}\n⏳ Действует до: ${ins.expires_at}`);
-    } catch (_e) {
-      return ctx.reply("Не смог сделать код. Попробуй позже.");
-    }
-  });
-
-
-  // simple text echo/help
-  tgBot.on("text", async (ctx) => {
-    const text = String(ctx.message?.text || "").trim();
-    if (!text) return;
-    if (/^ping$/i.test(text)) return ctx.reply("pong ✅");
-
-    // Для вопросов по правилам — отправляем в твой же API /api/ai/chat (если он поднят без Ollama — вернёт сниппеты)
-    try {
-      const base = normalizeBaseUrl(BACKEND_URL) || `http://127.0.0.1:${PORT}`;
-      const r = await fetch(`${base}/api/ai/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text })
-      });
-      const j = await r.json().catch(() => ({}));
-      const reply = String(j?.reply || "").trim();
-      if (reply) return ctx.reply(reply.slice(0, 3900)); // лимит TG ~4096
-      return ctx.reply("Не нашёл ответ. Попробуй переформулировать.");
-    } catch (e) {
-      return ctx.reply("Сервер AI сейчас недоступен. Попробуй позже.");
-    }
-  });
-
-  // webhook endpoint for Telegram updates
-  app.use(tgBot.webhookCallback(TG_WEBHOOK_PATH));
-
-  console.log(`🤖 Telegram bot route mounted: POST ${TG_WEBHOOK_PATH}`);
-}
-
-async function ensureWebhook() {
-  if (!tgBot) return;
-  if (!hasPublicUrl()) {
-    console.log("🤖 Telegram bot: BACKEND_URL/RENDER_EXTERNAL_URL is empty -> webhook not set");
-    return;
-  }
-  const base = normalizeBaseUrl(BACKEND_URL);
-  const fullUrl = `${base}${TG_WEBHOOK_PATH}`;
-  try {
-    // important: Telegram must reach your Render URL
-    await tgBot.telegram.setWebhook(fullUrl);
-    const info = await tgBot.telegram.getWebhookInfo();
-    console.log(`🤖 Telegram webhook set: ${fullUrl}`);
-    console.log(`🤖 Webhook info: url=${info?.url || "-"} pending=${info?.pending_update_count ?? "-"}`);
-  } catch (e) {
-    console.error("🤖 setWebhook error:", e?.message || e);
-  }
-}
-
-setupTelegramBotRoutes();
-
-
 app.listen(PORT, "0.0.0.0", () => {
-  // init TG webhook (Render)
-  ensureWebhook();
   console.log(`✅ Backend listening on port ${PORT}`);
+  // ✅ Set Telegram webhook on Render
+  if (process.env.RENDER_EXTERNAL_URL) {
+    TG.setWebhook(process.env.RENDER_EXTERNAL_URL)
+      .then((full) => console.log("🤖 Telegram webhook set:", full))
+      .catch((e) => console.error("WEBHOOK_SET_ERROR:", e));
+  } else {
+    console.log("⚠️ RENDER_EXTERNAL_URL not set (local run?)");
+  }
+
+  console.log(`🤖 Ollama: ${OLLAMA_ENABLED ? OLLAMA_HOST : 'OFF'} | model: ${OLLAMA_ENABLED ? OLLAMA_MODEL : 'OFF'} | embed: ${OLLAMA_ENABLED ? OLLAMA_EMBED_MODEL : 'OFF'}`);
   console.log(`📚 rules dir: ${RULES_DIR} | indexed refs: ${REF_INDEX.size} | chunks: ${RULE_CHUNKS.length}`);
   console.log(`🧠 RAG store: ${RAG_STORE_PATH} | vectors: ${RAG?.chunks?.length || 0}`);
   console.log(`📄 rules file fallback: ${RULES_FILE}`);
