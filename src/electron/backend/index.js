@@ -1,5 +1,4 @@
 import "dotenv/config";
-import { mountTelegramWebhookBot } from "./telegram_webhook_bot.js";
 import path from "node:path";
 import fs from "node:fs";
 import express from "express";
@@ -31,11 +30,29 @@ app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 app.use(express.json({ limit: "8mb" }));
 
+
+
 // ===============================
-// 🤖 Telegram bot (webhook only, Render)
+// 🤖 Telegram bot (webhook only, Render) — OPTIONAL
+// - Avoids deploy crash if telegram_webhook_bot.js is missing
+// - Enable by setting TG_WEBHOOK_ENABLED=1 on Render
 // ===============================
-const TG = mountTelegramWebhookBot(app, { webhookPath: "/tg/webhook", port: PORT });
-console.log("🤖 Telegram bot route mounted: POST /tg/webhook");
+let TG = null;
+if (process.env.TG_WEBHOOK_ENABLED === "1") {
+  try {
+    const mod = await import("./telegram_webhook_bot.js");
+    if (typeof mod.mountTelegramWebhookBot !== "function") {
+      console.warn("⚠️ telegram_webhook_bot.js loaded, but mountTelegramWebhookBot is not a function");
+    } else {
+      TG = mod.mountTelegramWebhookBot(app, { webhookPath: "/tg/webhook", port: PORT });
+      console.log("🤖 Telegram bot route mounted: POST /tg/webhook");
+    }
+  } catch (e) {
+    console.warn("⚠️ Telegram webhook bot not loaded:", e?.message || e);
+  }
+} else {
+  console.log("ℹ️ Telegram webhook bot disabled (set TG_WEBHOOK_ENABLED=1 to enable)");
+}
 
 
 const supabase = createClient(
